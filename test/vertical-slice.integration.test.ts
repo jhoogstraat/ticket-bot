@@ -12,6 +12,9 @@ import type { JiraIssueDto } from "../src/integrations/jira/jira-types.js";
 import { LocalRunner } from "../src/runner/local-runner.js";
 import { WorkspaceManager } from "../src/runner/workspace-manager.js";
 import { BugFixService } from "../src/services/bug-fix-service.js";
+import { publishInitialFix, runInitialFix } from "../src/workflows/initial-fix-phase.js";
+import { runReviewPhase } from "../src/workflows/review-phase.js";
+import type { BugFixWorkflowContext } from "../src/workflows/workflow-context.js";
 
 const exec = promisify(execFile);
 const cleanup: string[] = [];
@@ -86,18 +89,38 @@ describe("initial vertical slice", () => {
       repository.id,
     );
     const ticket = await service.loadTicket(issue.key);
-    const result = await service.executeInitial("bug-fix/ABC-1/1", 1, ticket, repository);
+    const context = {
+      run: async <T>(_name: string, operation: () => Promise<T>): Promise<T> => operation(),
+      set: () => undefined,
+    } as unknown as BugFixWorkflowContext;
+    const initial = await runInitialFix(context, service, "bug-fix/ABC-1/1", 1, ticket, repository);
+    expect(initial.status).toBe("actionable");
+    if (initial.status !== "actionable") throw new Error(initial.detail);
+    const reviewed = await runReviewPhase(context, service, initial.state, ticket, repository);
+    expect(reviewed.status).toBe("accepted");
+    if (reviewed.status !== "accepted") throw new Error(reviewed.detail);
+    const state = await publishInitialFix(
+      context,
+      service,
+      "bug-fix/ABC-1/1",
+      ticket,
+      repository,
+      reviewed.state,
+      initial.workspace,
+      initial.harnessResult,
+    );
+    const inspection = await workspaces.inspectFromBase(initial.workspace);
 
-    expect(result.state.state).toBe("CI_RUNNING");
-    expect(result.state.currentCommitSha).toMatch(/^[0-9a-f]{40}$/);
-    expect(result.inspection.changedFiles).toEqual([
+    expect(state.state).toBe("CI_RUNNING");
+    expect(state.currentCommitSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(inspection.changedFiles).toEqual([
       ".ticket-bot/ABC-1.txt",
       "ticket-analysis/ABC-1/ANALYSIS.md",
     ]);
-    expect(result.gate.actionable).toBe(true);
+    expect(initial.state.analysis?.rootCauseConfidence).toBe("high");
     expect(harness.analyses).toHaveLength(1);
     expect(harness.starts).toHaveLength(1);
-    expect(result.state.tokenUsage.review).toBeGreaterThan(0);
+    expect(state.tokenUsage.review).toBeGreaterThan(0);
     expect(jira.claimed).toEqual(["ABC-1"]);
     expect(gitlab.created[0]).toMatchObject({
       draft: true,

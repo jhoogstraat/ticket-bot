@@ -84,7 +84,7 @@ The MCP server is optional and is not called directly by the main workflow. Its 
 
 ## How Restate is used
 
-The central integration is [`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts). Restate supplies durable identity, state, side-effect journaling, and callback waits.
+The central integration is [`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts). Restate supplies durable identity, state, side-effect journaling, and callback waits. The handler delegates the lifecycle to [`initial-fix-phase.ts`](../src/workflows/initial-fix-phase.ts), [`review-phase.ts`](../src/workflows/review-phase.ts), [`ci-repair-phase.ts`](../src/workflows/ci-repair-phase.ts), and [`completion-phase.ts`](../src/workflows/completion-phase.ts), so each phase can be read independently without hiding its journaled operations.
 
 ### Durable identity
 
@@ -212,7 +212,7 @@ The following files contain the behavior that defines the bug-fix process.
 
 ### Durable orchestration
 
-[`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts) owns ordering and durable state transitions. It decides when to investigate, gate, claim, review, publish, repair, wait, stop, or hand off.
+[`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts) owns high-level ordering and durable state transitions. Its phase modules decide the detailed steps for initial implementation, independent review, CI repair, and final handoff. Together they decide when to investigate, gate, claim, review, publish, repair, wait, stop, or hand off.
 
 This is the most important file for understanding the end-to-end behavior.
 
@@ -363,10 +363,11 @@ For a first pass through the code, use this order:
 
 1. [`src/server.ts`](../src/server.ts) — see how the application is assembled.
 2. [`src/workflows/bug-fix-queue.ts`](../src/workflows/bug-fix-queue.ts) — see how filter runs fan out.
-3. [`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts) — follow the durable ticket lifecycle.
-4. [`src/services/bug-fix-service.ts`](../src/services/bug-fix-service.ts) — inspect each ticket operation.
-5. [`src/domain/analysis.ts`](../src/domain/analysis.ts) and [`src/workflows/repair-policy.ts`](../src/workflows/repair-policy.ts) — understand deterministic policy.
-6. [`src/domain/harness.ts`](../src/domain/harness.ts) and [`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts) — understand the agent boundary.
-7. [`src/runner/workspace-manager.ts`](../src/runner/workspace-manager.ts) and [`src/integrations`](../src/integrations) — inspect execution and external-system infrastructure.
+3. [`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts) — follow the thin durable lifecycle coordinator.
+4. [`src/workflows/initial-fix-phase.ts`](../src/workflows/initial-fix-phase.ts), [`src/workflows/review-phase.ts`](../src/workflows/review-phase.ts), [`src/workflows/ci-repair-phase.ts`](../src/workflows/ci-repair-phase.ts), and [`src/workflows/completion-phase.ts`](../src/workflows/completion-phase.ts) — read one lifecycle phase at a time.
+5. [`src/services/bug-fix-service.ts`](../src/services/bug-fix-service.ts) — inspect each ticket operation.
+6. [`src/domain/analysis.ts`](../src/domain/analysis.ts) and [`src/workflows/repair-policy.ts`](../src/workflows/repair-policy.ts) — understand deterministic policy.
+7. [`src/domain/harness.ts`](../src/domain/harness.ts) and [`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts) — understand the agent boundary.
+8. [`src/runner/workspace-manager.ts`](../src/runner/workspace-manager.ts) and [`src/integrations`](../src/integrations) — inspect execution and external-system infrastructure.
 
 For the workflow requirements and stage invariants, also see [`docs/architecture.md`](./architecture.md).

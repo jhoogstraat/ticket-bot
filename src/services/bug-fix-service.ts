@@ -7,29 +7,16 @@ import {
 } from "../domain/analysis.js";
 import type { CodingHarness, HarnessReviewResult, HarnessRunResult } from "../domain/harness.js";
 import { usedTokens } from "../domain/harness.js";
-import type { MergeRequest } from "../domain/merge-request.js";
 import type { RepositoryConfig } from "../domain/repository.js";
+import type { MergeRequest } from "../domain/merge-request.js";
 import type { NormalizedBugTicket } from "../domain/ticket.js";
 import type { BugFixWorkflowState } from "../domain/workflow.js";
-import { addTokenUsage, emptyTokenUsage } from "../domain/workflow.js";
+import { addTokenUsage, done, emptyTokenUsage, published } from "../domain/workflow.js";
 import type { GitLabClient } from "../integrations/gitlab/gitlab-client.js";
 import type { JiraClient } from "../integrations/jira/jira-client.js";
 import { normalizeJiraIssue } from "../integrations/jira/jira-normalizer.js";
 import type { ExecutionRunner, Workspace } from "../runner/execution-runner.js";
 import { WorkspaceManager, type WorkspaceInspection } from "../runner/workspace-manager.js";
-
-export interface InitialExecution {
-  ticket: NormalizedBugTicket;
-  repository: RepositoryConfig;
-  workspace: Workspace;
-  harnessResult: HarnessRunResult;
-  inspection: WorkspaceInspection;
-  commitSha: string;
-  mergeRequest: MergeRequest;
-  state: BugFixWorkflowState;
-  analysis: TicketAnalysis;
-  gate: ConfidenceGateDecision;
-}
 
 export class BugFixService {
   constructor(
@@ -47,68 +34,6 @@ export class BugFixService {
   }
   resolveRepository(ticket: NormalizedBugTicket): RepositoryConfig {
     return this.repositoryResolver(ticket);
-  }
-
-  async executeInitial(
-    runId: string,
-    generation: number,
-    ticket: NormalizedBugTicket,
-    repository: RepositoryConfig,
-  ): Promise<InitialExecution> {
-    const workspace = await this.createWorkspace(runId, ticket, repository);
-    const { analysis, gate } = await this.investigate(ticket, repository, workspace);
-    if (!gate.actionable) throw new DomainError("HUMAN_INPUT_REQUIRED", gate.reason);
-    await this.claimTicket(ticket.key);
-    const implementationWorkspace = await this.activateWorkspace(workspace);
-    const harnessResult = await this.startHarness(
-      ticket,
-      repository,
-      implementationWorkspace,
-      analysis,
-    );
-    const { inspection, commitSha } = await this.validateAndCommit(
-      implementationWorkspace,
-      ticket,
-      repository,
-      harnessResult,
-    );
-    const implementationState = this.createImplementationState(
-      runId,
-      generation,
-      ticket,
-      repository,
-      implementationWorkspace,
-      analysis,
-      harnessResult,
-      commitSha,
-    );
-    const reviewed = await this.review(implementationState, ticket, []);
-    if (reviewed.review.verdict !== "accept")
-      throw new DomainError(
-        "HARNESS_BLOCKED",
-        `Independent review did not accept the implementation: ${reviewed.review.summary}`,
-      );
-    await this.push(implementationWorkspace);
-    const mergeRequest = await this.createMergeRequest(
-      runId,
-      ticket,
-      repository,
-      implementationWorkspace,
-      harnessResult,
-    );
-    const state = this.createPublishedState(reviewed.state, mergeRequest);
-    return {
-      ticket,
-      repository,
-      workspace,
-      harnessResult,
-      inspection,
-      commitSha,
-      mergeRequest,
-      state,
-      analysis,
-      gate,
-    };
   }
 
   createWorkspace(
@@ -270,9 +195,7 @@ export class BugFixService {
     state: BugFixWorkflowState,
     mergeRequest: MergeRequest,
   ): BugFixWorkflowState {
-    const next = { ...state, mergeRequest, state: "CI_RUNNING" as const };
-    delete next.statusDetail;
-    return next;
+    return published(state, mergeRequest);
   }
 
   async repair(
@@ -432,11 +355,7 @@ export class BugFixService {
     if (state.state !== "REVIEW_READY" || !state.mergeRequest)
       throw new DomainError("VALIDATION_FAILURE", "Only an accepted review can be handed off");
     await this.jira.markReadyToMerge(state.issueKey, state.mergeRequest.url);
-    return {
-      ...state,
-      state: "DONE",
-      statusDetail: "Ready to merge; merge remains a human action",
-    };
+    return done(state, "Ready to merge; merge remains a human action");
   }
 
   validateHarnessResult(result: HarnessRunResult): void {

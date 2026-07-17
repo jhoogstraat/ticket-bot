@@ -31,4 +31,4 @@ bun run dev
 
 Register the endpoint and invoke the fake flow using the commands in [local development](docs/local-development.md). The repository must have an initial commit because each run starts from an isolated Git clone.
 
-See [architecture](docs/architecture.md), [code tour](docs/code-tour.md), and [implementation plan](docs/implementation-plan.md).
+For a guided first read, start with the [reading guide](docs/reading-guide.md). See also the [architecture](docs/architecture.md), [code tour](docs/code-tour.md), and [implementation plan](docs/implementation-plan.md).
