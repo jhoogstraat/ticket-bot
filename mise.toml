@@ -1,0 +1,5 @@
+[tools]
+bun = "1.3"
+
+[tasks.check]
+run = "bun run check"

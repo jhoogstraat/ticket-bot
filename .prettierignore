@@ -1,0 +1,5 @@
+dist/
+coverage/
+node_modules/
+.ticket-bot-workspaces/
+bun.lock

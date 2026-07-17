@@ -1,0 +1,20 @@
+services:
+  restate:
+    image: docker.restate.dev/restatedev/restate:latest
+    ports:
+      - "8080:8080"
+      - "9070:9070"
+      - "9071:9071"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  ticket-bot:
+    build: .
+    profiles: ["app"]
+    environment:
+      PORT: 9080
+      ADAPTER_MODE: fake
+      HARNESS_MODE: fake
+      WORKSPACE_ROOT: /tmp/ticket-bot-workspaces
+    ports:
+      - "9080:9080"
