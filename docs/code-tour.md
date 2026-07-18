@@ -204,7 +204,7 @@ The following files contain the behavior that defines the bugfix process.
 
 ### Durable orchestration
 
-[`src/features/bugfix/bugfix.restate-workflow.ts`](../src/features/bugfix/bugfix.restate-workflow.ts) owns the complete durable lifecycle. Its `run` handler reads as a sequence of ticket loading, investigation, gating, implementation, review, publication, callback waits, repair, and handoff steps.
+[`src/workflows/bugfix/workflow.ts`](../src/workflows/bugfix/workflow.ts) owns the complete durable lifecycle. Its `run` handler reads as a sequence of ticket loading, investigation, gating, implementation, review, publication, and handoff steps. Cohesive operation details live under [`src/workflows/bugfix/tasks`](../src/workflows/bugfix/tasks), while the workflow keeps journal boundaries, retries, and decisions visible.
 
 This is the most important file for understanding the end-to-end behavior.
 
@@ -220,7 +220,7 @@ This is the most important file for understanding the end-to-end behavior.
 
 ### Repair policy
 
-The workflow's `decideRepair` policy determines whether a Jenkins failure may trigger another code change. It stops for infrastructure failures, repeated unchanged failures, and exhausted repair limits.
+[`src/workflows/bugfix/tasks/repair-policy.ts`](../src/workflows/bugfix/tasks/repair-policy.ts) determines whether a Jenkins failure may trigger another code change. It stops for infrastructure failures, repeated unchanged failures, and exhausted repair limits.
 
 ### Domain contracts
 
@@ -256,11 +256,11 @@ A future Kubernetes executor should own both its workspace and coding runtime be
 
 ## Error handling
 
-Error handling is split between domain classification, workflow policy, Restate retries, and adapter mechanics.
+Error handling is split between workflow policy, Restate failure handling, and adapter mechanics.
 
 ### Stable error categories
 
-Workflow and integration failures use native `Error` values; durable workflow outcomes use Restate `TerminalError` directly.
+Non-retryable workflow and integration failures use Restate `TerminalError` directly.
 
 - `HARNESS_TIMEOUT`;
 - `HARNESS_BLOCKED`;
@@ -271,11 +271,11 @@ Workflow and integration failures use native `Error` values; durable workflow ou
 - `REPEATED_FAILURE`;
 - `PUSH_FAILURE`.
 
-These codes let the workflow distinguish a ticket that needs human action from an unexpected application failure.
+These categories document why an operation can fail; they are not converted into a successful workflow result.
 
-### Workflow outcome mapping
+### Workflow outcomes
 
-The catch block in `BugFixWorkflow.run` maps known intervention conditions to `HUMAN_REQUIRED`. Unexpected or non-recoverable failures become `FAILED`.
+Domain decisions that deliberately stop automation return `HUMAN_REQUIRED` with a concrete reason. The workflow does not catch operational failures: `TerminalError` permanently fails the invocation, while retryable errors remain under Restate's retry policy.
 
 ### Restate retries
 
@@ -316,8 +316,8 @@ For a first pass through the code, use this order:
 
 1. [`src/app/server.ts`](../src/app/server.ts) — see how the application is assembled.
 2. [`src/features/bugfix/bugfix-queue.restate-service.ts`](../src/features/bugfix/bugfix-queue.restate-service.ts) — see how filter runs fan out.
-3. [`src/features/bugfix/bugfix.restate-workflow.ts`](../src/features/bugfix/bugfix.restate-workflow.ts) — follow the complete sequential lifecycle.
-4. [`src/workflows/bugfix/tasks/analysis.ts`](../src/workflows/bugfix/tasks/analysis.ts), [`src/domain/ticket-analysis.ts`](../src/domain/ticket-analysis.ts), and [`src/workflows/bugfix/workflow-state.ts`](../src/workflows/bugfix/workflow-state.ts) — understand deterministic policy, the analysis contract, and durable state.
+3. [`src/workflows/bugfix/workflow.ts`](../src/workflows/bugfix/workflow.ts) — follow the complete sequential lifecycle.
+4. [`src/workflows/bugfix/tasks`](../src/workflows/bugfix/tasks), [`src/domain/ticket-analysis.ts`](../src/domain/ticket-analysis.ts), and [`src/workflows/bugfix/workflow-state.ts`](../src/workflows/bugfix/workflow-state.ts) — understand operation details, deterministic policy, the analysis contract, and durable state.
 5. [`src/features/bugfix/coding/coding-harness.ts`](../src/features/bugfix/coding/coding-harness.ts) and [`src/features/bugfix/coding/codex-coding-harness.ts`](../src/features/bugfix/coding/codex-coding-harness.ts) — understand the agent boundary.
 6. [`src/features/bugfix/workspace/local-git-workspaces.ts`](../src/features/bugfix/workspace/local-git-workspaces.ts) and [`src/integrations`](../src/integrations) — inspect execution and external-system infrastructure.
 

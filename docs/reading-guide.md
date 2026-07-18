@@ -39,32 +39,33 @@ flowchart TD
 Follow this order for an end-to-end mental model. On a first pass, read public types and top-level methods before implementation details.
 
 1. [`src/app/server.ts`](../src/app/server.ts) — composition root: which concrete services, adapters, workflows, and webhooks make up the application.
-2. [`src/features/bugfix/bugfix-queue.restate-service.ts`](../src/features/bugfix/bugfix-queue.restate-service.ts) — how a Jira filter becomes one immutable, deduplicated batch of independent ticket workflows.
-3. [`src/features/bugfix/bugfix.restate-workflow.ts`](../src/features/bugfix/bugfix.restate-workflow.ts) — the canonical, sequential ticket lifecycle: operations, durable state, callback waits, and terminal outcomes.
-4. [`src/features/bugfix/workflow-state.ts`](../src/features/bugfix/workflow-state.ts) — the durable state, grouped stage types, transition helpers, and callback contracts.
-5. [`src/workflows/bugfix/tasks/analysis.ts`](../src/workflows/bugfix/tasks/analysis.ts) — the deterministic confidence and repository gate.
-6. [`src/features/bugfix/coding/coding-harness.ts`](../src/features/bugfix/coding/coding-harness.ts) — the provider-neutral contract for investigation, implementation, repair, revision, and independent review.
-7. [`src/features/bugfix/coding/codex-coding-harness.ts`](../src/features/bugfix/coding/codex-coding-harness.ts), [`src/features/bugfix/coding/codex-prompts.ts`](../src/features/bugfix/coding/codex-prompts.ts), and [`src/features/bugfix/coding/codex-result-parser.ts`](../src/features/bugfix/coding/codex-result-parser.ts) — how bounded Codex processes receive prompts and return validated structured results.
-8. [`src/features/bugfix/workspace/local-git-workspaces.ts`](../src/features/bugfix/workspace/local-git-workspaces.ts) — containment-checked local Git workspaces, branches, validation, commits, and pushes.
-9. [`src/integrations`](../src/integrations) and [`src/features/bugfix/ingress`](../src/features/bugfix/ingress) — external API mechanics and delivery of CI/review callbacks into the durable workflow.
+2. [`src/entrypoints/bugfix-queue.restate-service.ts`](../src/entrypoints/bugfix-queue.restate-service.ts) — how a Jira filter becomes one immutable, deduplicated batch of independent ticket workflows.
+3. [`src/workflows/bugfix/workflow.ts`](../src/workflows/bugfix/workflow.ts) — the canonical, sequential ticket lifecycle: durable operations, retry policy, branching, and terminal outcomes.
+4. [`src/workflows/bugfix/tasks/coding.ts`](../src/workflows/bugfix/tasks/coding.ts) and [`src/workflows/bugfix/tasks/publication.ts`](../src/workflows/bugfix/tasks/publication.ts) — the cohesive coding, validation, publication, and Jira-handoff operations invoked by the workflow.
+5. [`src/workflows/bugfix/workflow-state.ts`](../src/workflows/bugfix/workflow-state.ts) — the durable state, grouped stage types, construction, and transition helpers.
+6. [`src/workflows/bugfix/tasks/analysis.ts`](../src/workflows/bugfix/tasks/analysis.ts) and [`src/workflows/bugfix/tasks/repair-policy.ts`](../src/workflows/bugfix/tasks/repair-policy.ts) — deterministic confidence and bounded repair policies.
+7. [`src/coding/coding-harness.ts`](../src/coding/coding-harness.ts) — the provider-neutral contract for investigation, implementation, repair, revision, and independent review.
+8. [`src/coding/codex-coding-harness.ts`](../src/coding/codex-coding-harness.ts), [`src/coding/codex-prompts.ts`](../src/coding/codex-prompts.ts), and [`src/coding/codex-result-parser.ts`](../src/coding/codex-result-parser.ts) — how bounded Codex processes receive prompts and return validated structured results.
+9. [`src/integrations/git/local-git-workspaces.ts`](../src/integrations/git/local-git-workspaces.ts) — containment-checked local Git workspaces, branches, validation, commits, and pushes.
+10. [`src/integrations`](../src/integrations) and [`src/entrypoints/jira-webhook.restate-service.ts`](../src/entrypoints/jira-webhook.restate-service.ts) — external API mechanics and delivery of normalized Jira webhook commands.
 
 For a narrower question, jump directly to the matching responsibility below rather than reading every adapter.
 
 ## Responsibility map
 
-| Question                                      | Start here                                                                                                          | Responsibility                                                                 |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| How does the process start?                   | [`src/app/server.ts`](../src/app/server.ts)                                                                         | Runtime wiring and Restate endpoint registration                               |
-| How are tickets selected?                     | [`src/features/bugfix/bugfix-queue.restate-service.ts`](../src/features/bugfix/bugfix-queue.restate-service.ts)     | Fixed queue capture and independent workflow dispatch                          |
-| What happens next for one ticket?             | [`src/features/bugfix/bugfix.restate-workflow.ts`](../src/features/bugfix/bugfix.restate-workflow.ts)               | Ordering, durability, retries, waits, and state transitions                    |
-| How is one operation performed?               | [`src/features/bugfix/bugfix.restate-workflow.ts`](../src/features/bugfix/bugfix.restate-workflow.ts)               | Jira evidence, workspaces, harness calls, validation, publication, and handoff |
-| Why was a ticket blocked?                     | [`src/workflows/bugfix/tasks/analysis.ts`](../src/workflows/bugfix/tasks/analysis.ts)                               | Analysis contract and deterministic confidence/repository gate                 |
-| Why was CI repaired or stopped?               | [`src/features/bugfix/bugfix.restate-workflow.ts`](../src/features/bugfix/bugfix.restate-workflow.ts)               | Bounded repair eligibility and stop conditions                                 |
-| What may the coding agent do?                 | [`src/features/bugfix/coding/coding-harness.ts`](../src/features/bugfix/coding/coding-harness.ts)                   | Agent-facing operation and result boundaries                                   |
-| How is Codex invoked safely?                  | [`src/features/bugfix/coding/codex-coding-harness.ts`](../src/features/bugfix/coding/codex-coding-harness.ts)       | Bounded subprocess sessions, permissions, timeouts, and schemas                |
-| How are repositories isolated?                | [`src/features/bugfix/workspace/local-git-workspaces.ts`](../src/features/bugfix/workspace/local-git-workspaces.ts) | Containment-checked local Git workspaces and branch operations                 |
-| How do Jira, GitLab, Jenkins, and Sonar work? | [`src/integrations`](../src/integrations)                                                                           | Replaceable external-system adapters                                           |
-| How do asynchronous results resume work?      | [`src/features/bugfix/ingress`](../src/features/bugfix/ingress)                                                     | Validation, correlation, and resolution of durable callback promises           |
+| Question                                      | Start here                                                                                              | Responsibility                                                            |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| How does the process start?                   | [`src/app/server.ts`](../src/app/server.ts)                                                             | Runtime wiring and Restate endpoint registration                          |
+| How are tickets selected?                     | [`src/entrypoints/bugfix-queue.restate-service.ts`](../src/entrypoints/bugfix-queue.restate-service.ts) | Fixed queue capture and independent workflow dispatch                     |
+| What happens next for one ticket?             | [`src/workflows/bugfix/workflow.ts`](../src/workflows/bugfix/workflow.ts)                               | Ordering, durability, retries, and state transitions                      |
+| How is one operation performed?               | [`src/workflows/bugfix/tasks`](../src/workflows/bugfix/tasks)                                           | Harness calls, validation, publication, handoff, and deterministic policy |
+| Why was a ticket blocked?                     | [`src/workflows/bugfix/tasks/analysis.ts`](../src/workflows/bugfix/tasks/analysis.ts)                   | Analysis contract and deterministic confidence/repository gate            |
+| Why was CI repaired or stopped?               | [`src/workflows/bugfix/tasks/repair-policy.ts`](../src/workflows/bugfix/tasks/repair-policy.ts)         | Bounded repair eligibility and stop conditions                            |
+| What may the coding agent do?                 | [`src/coding/coding-harness.ts`](../src/coding/coding-harness.ts)                                       | Agent-facing operation and result boundaries                              |
+| How is Codex invoked safely?                  | [`src/coding/codex-coding-harness.ts`](../src/coding/codex-coding-harness.ts)                           | Bounded subprocess sessions, permissions, timeouts, and schemas           |
+| How are repositories isolated?                | [`src/integrations/git/local-git-workspaces.ts`](../src/integrations/git/local-git-workspaces.ts)       | Containment-checked local Git workspaces and branch operations            |
+| How do Jira, GitLab, Jenkins, and Sonar work? | [`src/integrations`](../src/integrations)                                                               | Replaceable external-system adapters                                      |
+| How do asynchronous results resume work?      | [`src/features/bugfix/ingress`](../src/features/bugfix/ingress)                                         | Validation, correlation, and resolution of durable callback promises      |
 
 ## Key terms
 

@@ -3,7 +3,6 @@ import type { MergeRequest } from "../src/domain/merge-request.js";
 import type { BugFixWorkflowState } from "../src/workflows/bugfix/workflow-state.js";
 import {
   done,
-  failed,
   humanRequired,
   published,
   repairing,
@@ -31,12 +30,6 @@ describe("workflow state transitions", () => {
     expect(humanRequired(current, "input needed")).toMatchObject({
       state: "HUMAN_REQUIRED",
       statusDetail: "input needed",
-      currentCommitSha: "abc123",
-    });
-
-    expect(failed(current, "unexpected failure")).toMatchObject({
-      state: "FAILED",
-      statusDetail: "unexpected failure",
       currentCommitSha: "abc123",
     });
 

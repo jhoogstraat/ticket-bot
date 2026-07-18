@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import * as clients from "@restatedev/restate-sdk-clients";
 import * as restate from "@restatedev/restate-sdk";
@@ -11,6 +14,13 @@ import { FakeJiraClient } from "../src/integrations/jira/jira-client.js";
 import type { JiraIssueDto } from "../src/integrations/jira/jira-types.js";
 import { createBugFixQueueRestateService } from "../src/entrypoints/bugfix-queue.restate-service.js";
 import type { BugFixWorkflow } from "../src/workflows/bugfix/workflow.js";
+import { dependencies } from "../src/workflows/bugfix/dependencies.js";
+import { FakeCodingHarness } from "../src/coding/fake-coding-harness.js";
+import type { AnalyzeHarnessTaskInput } from "../src/coding/coding-harness.js";
+import { FakeGitLabClient } from "../src/integrations/gitlab/gitlab-client.js";
+import { LocalGitWorkspaces } from "../src/integrations/git/local-git-workspaces.js";
+import type { RepositoryConfig } from "../src/domain/repository.js";
+import type { BugFixWorkflowResult } from "../src/workflows/bugfix/workflow-state.js";
 
 const exec = promisify(execFile);
 
@@ -29,6 +39,27 @@ const issue: JiraIssueDto = {
   },
 };
 
+const workflowIssues: JiraIssueDto[] = [
+  {
+    ...issue,
+    key: "DEMO-1",
+    fields: {
+      ...issue.fields,
+      summary: "Replay the production bugfix workflow",
+      components: [{ name: "Ticket Bot" }],
+    },
+  },
+  {
+    ...issue,
+    key: "ERROR-1",
+    fields: {
+      ...issue.fields,
+      summary: "Propagate a terminal workflow failure",
+      components: [{ name: "Ticket Bot" }],
+    },
+  },
+];
+
 const queueTarget = restate.workflow({
   name: "QueueReplayTarget",
   handlers: {
@@ -40,6 +71,13 @@ const queue = createBugFixQueueRestateService(
   new FakeJiraClient(new Map([[issue.key, issue]])),
   queueTarget as unknown as typeof BugFixWorkflow,
 );
+
+type ProductionWorkflowDefinition = restate.WorkflowDefinition<
+  "BugFixWorkflow",
+  {
+    run: (ctx: restate.WorkflowContext, issueKey: string) => Promise<BugFixWorkflowResult>;
+  }
+>;
 
 const queueInvoker = restate.service({
   name: "QueueReplayInvoker",
@@ -54,10 +92,17 @@ const describeWithRestate = process.env.RUN_RESTATE_TESTS === "1" ? describe : d
 describeWithRestate("Restate always-replay integration", () => {
   let environment: RestateIntegrationEnvironment | undefined;
   let ingress: clients.Ingress;
+  let productionWorkflow: ProductionWorkflowDefinition;
+  let fixtureRoot: string | undefined;
 
   beforeAll(async () => {
+    const fixture = await createProductionWorkflowFixture();
+    fixtureRoot = fixture.root;
+    Object.assign(dependencies, fixture.dependencies);
+    ({ BugFixWorkflow: productionWorkflow } = await import("../src/workflows/bugfix/workflow.js"));
+
     environment = await startRestateIntegrationEnvironment({
-      services: [queueTarget, queue, queueInvoker],
+      services: [queueTarget, queue, queueInvoker, productionWorkflow],
       alwaysReplay: true,
       disableRetries: true,
       storage: "memory",
@@ -68,6 +113,7 @@ describeWithRestate("Restate always-replay integration", () => {
 
   afterAll(async () => {
     await environment?.stop();
+    if (fixtureRoot) await rm(fixtureRoot, { recursive: true, force: true });
   });
 
   it("replays the production queue handler without re-reading its captured queue", async () => {
@@ -84,7 +130,89 @@ describeWithRestate("Restate always-replay integration", () => {
 
     expect(workflowResult).toBe("ABC-1");
   });
+
+  it("replays the production bugfix workflow", async () => {
+    const result = await callProductionWorkflow(ingress, "DEMO-1");
+
+    expect(result).toEqual({
+      runId: "bugfix/DEMO-1",
+      state: "DONE",
+      detail: "Ready to merge; merge remains a human action",
+    });
+  });
+
+  it("lets Restate expose terminal failures", async () => {
+    expect(callProductionWorkflow(ingress, "ERROR-1")).rejects.toThrow(
+      "Analysis returned MISMATCHED-1 for ERROR-1",
+    );
+  });
 });
+
+async function callProductionWorkflow(
+  ingress: clients.Ingress,
+  issueKey: string,
+): Promise<BugFixWorkflowResult> {
+  return await ingress.call<string, BugFixWorkflowResult>({
+    service: "BugFixWorkflow",
+    handler: "run",
+    key: `bugfix/${issueKey}`,
+    parameter: issueKey,
+  });
+}
+
+class ReplayCodingHarness extends FakeCodingHarness {
+  override async analyzeTask(input: AnalyzeHarnessTaskInput) {
+    const analysis = await super.analyzeTask(input);
+    return input.ticket.key === "ERROR-1" ? { ...analysis, issueKey: "MISMATCHED-1" } : analysis;
+  }
+}
+
+async function createProductionWorkflowFixture() {
+  const root = await mkdtemp(join(tmpdir(), "ticket-bot-replay-"));
+  const remote = join(root, "remote.git");
+  const seed = join(root, "seed");
+  await exec("git", ["init", "--bare", "--initial-branch=main", remote]);
+  await exec("git", ["init", "--initial-branch=main", seed]);
+  await exec("git", ["config", "user.name", "Ticket Bot Test"], { cwd: seed });
+  await exec("git", ["config", "user.email", "ticket-bot@example.test"], { cwd: seed });
+  await writeFile(join(seed, "README.md"), "Replay fixture\n", "utf8");
+  await exec("git", ["add", "README.md"], { cwd: seed });
+  await exec("git", ["commit", "-m", "test: seed replay fixture"], { cwd: seed });
+  await exec("git", ["remote", "add", "origin", remote], { cwd: seed });
+  await exec("git", ["push", "origin", "main"], { cwd: seed });
+
+  const repository: RepositoryConfig = {
+    id: "ticket-bot",
+    jiraComponents: ["Ticket Bot"],
+    cloneUrl: remote,
+    gitlabProjectId: "local/ticket-bot",
+    defaultBranch: "main",
+    buildCommands: [],
+    testCommands: [],
+    lintCommands: [],
+    harness: "codex",
+    limits: {
+      maxAgentTurns: 5,
+      maxChangedFiles: 5,
+      maxRepairAttempts: 2,
+      maxExecutionMinutes: 5,
+    },
+  };
+
+  const jira = new FakeJiraClient(new Map(workflowIssues.map((item) => [item.key, item])));
+
+  return {
+    root,
+    dependencies: {
+      jira,
+      gitlab: new FakeGitLabClient(),
+      codingHarness: new ReplayCodingHarness(),
+      workspaces: new LocalGitWorkspaces(join(root, "workspaces")),
+      resolveRepository: () => repository,
+      actionableRepositoryId: repository.id,
+    },
+  };
+}
 
 interface RestateIntegrationEnvironment {
   baseUrl(): string;

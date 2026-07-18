@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { CompactCiFailure } from "../src/domain/ci.js";
 import type { BugFixWorkflowState } from "../src/workflows/bugfix/workflow-state.js";
-import { decideRepair } from "../src/workflows/bugfix/workflow.js";
+import { decideRepair } from "../src/workflows/bugfix/tasks/repair-policy.js";
 
 const state: BugFixWorkflowState = {
   runId: "r",
