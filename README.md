@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/ticket-bot-icon.png" alt="Ticket Bot icon" width="180">
+  <img src="docs/assets/bug-bot-icon.png" alt="Bug Bot icon" width="180">
 </p>
 
-<h1 align="center">Ticket Bot</h1>
+<h1 align="center">Bug Bot</h1>
 
 <p align="center">
   <strong>From Jira bug to reviewed draft merge request—durably, safely, and without babysitting.</strong>
@@ -10,7 +10,7 @@
 
 ## What
 
-Ticket Bot is a durable bug-resolution pipeline. It picks up Jira tickets, investigates the problem, implements a focused fix in an isolated workspace, validates the result, runs an independent review, and opens a draft merge request.
+Bug Bot is a durable bug-resolution pipeline. It picks up Jira tickets, investigates the problem, implements a focused fix in an isolated workspace, validates the result, runs an independent review, and opens a draft merge request.
 
 It automates the repetitive path to **ready for review**. The final merge always stays with a human.
 
@@ -18,7 +18,7 @@ It automates the repetitive path to **ready for review**. The final merge always
 
 Writing code is only one part of fixing a production bug. The hard part is making the entire process reliable: retries, crashes, stale callbacks, incomplete tickets, scope creep, failed validation, and unsafe handoffs.
 
-Ticket Bot wraps the coding agent in deterministic TypeScript and durable Restate orchestration. Completed work survives restarts, side effects stay bounded, and uncertain fixes stop before they can mutate Jira or the repository.
+Bug Bot wraps the coding agent in deterministic TypeScript and durable Restate orchestration. Completed work survives restarts, side effects stay bounded, and uncertain fixes stop before they can mutate Jira or the repository.
 
 ## How
 

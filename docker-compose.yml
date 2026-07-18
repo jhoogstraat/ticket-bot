@@ -8,7 +8,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  ticket-bot:
+  bug-bot:
     build: .
     profiles: ["app"]
     environment:
@@ -17,7 +17,7 @@ services:
       RESTATE_INGRESS_URL: http://restate:8080
       ADAPTER_MODE: fake
       HARNESS_MODE: fake
-      WORKSPACE_ROOT: /tmp/ticket-bot-workspaces
+      WORKSPACE_ROOT: /tmp/bug-bot-workspaces
     ports:
       - "9080:9080"
       - "3000:3000"

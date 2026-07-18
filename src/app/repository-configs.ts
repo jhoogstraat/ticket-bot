@@ -3,10 +3,10 @@ import type { NormalizedBugTicket } from "../domain/ticket.js";
 
 export const repositoryConfigs: RepositoryConfig[] = [
   {
-    id: "ticket-bot",
-    jiraComponents: ["Ticket Bot", "Automation"],
+    id: "bug-bot",
+    jiraComponents: ["Bug Bot", "Automation"],
     cloneUrl: process.cwd(),
-    gitlabProjectId: "local/ticket-bot",
+    gitlabProjectId: "local/bug-bot",
     defaultBranch: "main",
     buildCommands: ["bun run build"],
     testCommands: ["bun run test"],

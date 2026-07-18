@@ -29,7 +29,7 @@ describe("LocalGitWorkspaces", () => {
       shortSlug: "Keep existing workspace",
       repository: {
         id: "fixture",
-        jiraComponents: ["Ticket Bot"],
+        jiraComponents: ["Bug Bot"],
         cloneUrl: source,
         gitlabProjectId: "group/fixture",
         defaultBranch: "main",
@@ -66,7 +66,7 @@ describe("LocalGitWorkspaces", () => {
 });
 
 async function createRepositoryFixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "ticket-bot-workspaces-"));
+  const root = await mkdtemp(join(tmpdir(), "bug-bot-workspaces-"));
   temporaryRoots.push(root);
   const source = join(root, "source");
 

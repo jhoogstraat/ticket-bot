@@ -3,5 +3,5 @@ dist/
 coverage/
 .env
 .DS_Store
-.ticket-bot-workspaces/
+.bug-bot-workspaces/
 *.log

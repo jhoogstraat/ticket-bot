@@ -29,7 +29,7 @@ export class FakeCodingHarness implements CodingHarness {
       issue: input.ticket.description ?? input.ticket.summary,
       rootCause: "Simulated root cause",
       proposedFix: "Create one focused fixture change",
-      expectedFiles: [`.ticket-bot/${input.ticket.key}.txt`],
+      expectedFiles: [`.bug-bot/${input.ticket.key}.txt`],
       nonGoals: ["Unrelated changes"],
       observableBehavior: ["Focused fixture exists"],
       jiraEvidence: [input.ticket.summary],
@@ -42,8 +42,8 @@ export class FakeCodingHarness implements CodingHarness {
 
   async startTask(input: StartHarnessTaskInput): Promise<HarnessRunResult> {
     this.starts.push(structuredClone(input));
-    const relative = `.ticket-bot/${input.ticket.key}.txt`;
-    await mkdir(join(input.workspacePath, ".ticket-bot"), { recursive: true });
+    const relative = `.bug-bot/${input.ticket.key}.txt`;
+    await mkdir(join(input.workspacePath, ".bug-bot"), { recursive: true });
     await writeFile(
       join(input.workspacePath, relative),
       `Simulated focused fix for ${input.ticket.key}\n`,
@@ -65,7 +65,7 @@ export class FakeCodingHarness implements CodingHarness {
     input: ContinueHarnessTaskInput,
   ): Promise<HarnessRunResult> {
     this.continuations.push(structuredClone(input));
-    const relative = `.ticket-bot/repair-${this.continuations.length}.txt`;
+    const relative = `.bug-bot/repair-${this.continuations.length}.txt`;
     await writeFile(
       join(input.workspacePath, relative),
       `Simulated repair for ${input.failure.fingerprint}\n`,
@@ -83,7 +83,7 @@ export class FakeCodingHarness implements CodingHarness {
 
   async reviseTask(sessionId: string, input: ReviseHarnessTaskInput): Promise<HarnessRunResult> {
     this.revisions.push(structuredClone(input));
-    const relative = `.ticket-bot/review-revision-${this.revisions.length}.txt`;
+    const relative = `.bug-bot/review-revision-${this.revisions.length}.txt`;
     await writeFile(join(input.workspacePath, relative), "Simulated review revision\n", "utf8");
     return {
       sessionId,

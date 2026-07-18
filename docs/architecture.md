@@ -2,7 +2,7 @@
 
 ## Governing workflow
 
-Ticket Bot implements the nine-stage bugfix loop as Restate-owned orchestration. Deterministic code owns queue capture, gates, mutations, retries, correlation, and handoff. Codex invocations are bounded workers for investigation, implementation, CI repair, and independent review; they never receive Jira, GitLab, Jenkins, or SonarQube credentials.
+Bug Bot implements the nine-stage bugfix loop as Restate-owned orchestration. Deterministic code owns queue capture, gates, mutations, retries, correlation, and handoff. Codex invocations are bounded workers for investigation, implementation, CI repair, and independent review; they never receive Jira, GitLab, Jenkins, or SonarQube credentials.
 
 ```mermaid
 flowchart LR

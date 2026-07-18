@@ -16,7 +16,7 @@ const demoIssue: JiraIssueDto = {
     description: "Create one focused simulated change.",
     status: { name: "Ready for development" },
     issuetype: { name: "Bug" },
-    components: [{ name: "Ticket Bot" }],
+    components: [{ name: "Bug Bot" }],
     labels: ["demo"],
     comment: { comments: [] },
     issuelinks: [],

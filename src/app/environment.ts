@@ -5,7 +5,7 @@ const schema = z.object({
   APP_PORT: z.coerce.number().int().positive().default(3000),
   ADAPTER_MODE: z.enum(["fake", "real"]).default("fake"),
   HARNESS_MODE: z.enum(["fake", "codex"]).default("fake"),
-  WORKSPACE_ROOT: z.string().default(".ticket-bot-workspaces"),
+  WORKSPACE_ROOT: z.string().default(".bug-bot-workspaces"),
   CODEX_TIMEOUT_MINUTES: z.coerce.number().positive().default(45),
   RESTATE_INGRESS_URL: z.url().default("http://localhost:8080"),
   RESTATE_IDENTITY_KEYS: z

@@ -1,10 +1,10 @@
 # Reading guide
 
-This is the shortest path to understanding Ticket Bot. Read it lifecycle-first: begin with what the system does, then follow one ticket through durable orchestration, domain policy, agent execution, and external adapters. For deeper detail, see [architecture.md](architecture.md) and [code-tour.md](code-tour.md).
+This is the shortest path to understanding Bug Bot. Read it lifecycle-first: begin with what the system does, then follow one ticket through durable orchestration, domain policy, agent execution, and external adapters. For deeper detail, see [architecture.md](architecture.md) and [code-tour.md](code-tour.md).
 
 ## Business lifecycle
 
-Ticket Bot turns a captured Jira bug into a reviewed draft merge request that is ready for a human to merge:
+Bug Bot turns a captured Jira bug into a reviewed draft merge request that is ready for a human to merge:
 
 1. Capture and freeze the issues returned by a Jira filter.
 2. Start one durable workflow per ticket so tickets progress independently.

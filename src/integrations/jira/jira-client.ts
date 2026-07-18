@@ -73,7 +73,7 @@ export class HttpJiraClient implements JiraClient {
       `${this.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/remotelink`,
     );
 
-    const globalId = `ticket-bot:${mergeRequestUrl}`;
+    const globalId = `bug-bot:${mergeRequestUrl}`;
     const existing = (await (
       await this.request(url, { headers: { accept: "application/json" } })
     ).json()) as Array<{

@@ -1,4 +1,4 @@
-# Ticket Bot code tour
+# Bug Bot code tour
 
 This document explains the runtime entry points, how Restate coordinates durable work, where Codex is used, and how the core workflow is separated from infrastructure.
 

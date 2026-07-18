@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ticket-bot",
+      "name": "bug-bot",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.17.5",
         "@openai/codex-sdk": "^0.144.5",

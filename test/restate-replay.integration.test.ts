@@ -46,7 +46,7 @@ const workflowIssues: JiraIssueDto[] = [
     fields: {
       ...issue.fields,
       summary: "Replay the production bugfix workflow",
-      components: [{ name: "Ticket Bot" }],
+      components: [{ name: "Bug Bot" }],
     },
   },
   {
@@ -55,7 +55,7 @@ const workflowIssues: JiraIssueDto[] = [
     fields: {
       ...issue.fields,
       summary: "Propagate a terminal workflow failure",
-      components: [{ name: "Ticket Bot" }],
+      components: [{ name: "Bug Bot" }],
     },
   },
 ];
@@ -168,13 +168,13 @@ class ReplayCodingHarness extends FakeCodingHarness {
 }
 
 async function createProductionWorkflowFixture() {
-  const root = await mkdtemp(join(tmpdir(), "ticket-bot-replay-"));
+  const root = await mkdtemp(join(tmpdir(), "bug-bot-replay-"));
   const remote = join(root, "remote.git");
   const seed = join(root, "seed");
   await exec("git", ["init", "--bare", "--initial-branch=main", remote]);
   await exec("git", ["init", "--initial-branch=main", seed]);
-  await exec("git", ["config", "user.name", "Ticket Bot Test"], { cwd: seed });
-  await exec("git", ["config", "user.email", "ticket-bot@example.test"], { cwd: seed });
+  await exec("git", ["config", "user.name", "Bug Bot Test"], { cwd: seed });
+  await exec("git", ["config", "user.email", "bug-bot@example.test"], { cwd: seed });
   await writeFile(join(seed, "README.md"), "Replay fixture\n", "utf8");
   await exec("git", ["add", "README.md"], { cwd: seed });
   await exec("git", ["commit", "-m", "test: seed replay fixture"], { cwd: seed });
@@ -182,10 +182,10 @@ async function createProductionWorkflowFixture() {
   await exec("git", ["push", "origin", "main"], { cwd: seed });
 
   const repository: RepositoryConfig = {
-    id: "ticket-bot",
-    jiraComponents: ["Ticket Bot"],
+    id: "bug-bot",
+    jiraComponents: ["Bug Bot"],
     cloneUrl: remote,
-    gitlabProjectId: "local/ticket-bot",
+    gitlabProjectId: "local/bug-bot",
     defaultBranch: "main",
     buildCommands: [],
     testCommands: [],
@@ -246,7 +246,7 @@ class AppleContainerRestateEnvironment implements RestateIntegrationEnvironment 
     if (!endpointAddress || typeof endpointAddress === "string")
       throw new Error("Restate test endpoint did not bind a TCP port");
 
-    const name = `ticket-bot-restate-${crypto.randomUUID()}`;
+    const name = `bug-bot-restate-${crypto.randomUUID()}`;
     const ingressPort = await availablePort();
     const adminPort = await availablePort();
     try {

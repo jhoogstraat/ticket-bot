@@ -77,7 +77,7 @@ function extractProviderEventId(event: unknown): string | undefined {
 
 function hasValidSignature(request: Request, rawBody: string, secret: string | undefined): boolean {
   if (!secret) return true;
-  const received = request.headers.get("x-ticket-bot-signature");
+  const received = request.headers.get("x-bug-bot-signature");
   if (!received) return false;
   const expected = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;
   const receivedBytes = Buffer.from(received);

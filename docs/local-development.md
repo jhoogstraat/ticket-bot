@@ -39,7 +39,7 @@ curl -X POST http://localhost:9070/deployments \
 
 ## Trigger the fake flow
 
-Submit the bundled fake Jira ticket to the webhook API. Fake mode accepts unsigned requests; real mode requires `x-ticket-bot-signature: sha256=<HMAC-SHA256(raw-body)>`.
+Submit the bundled fake Jira ticket to the webhook API. Fake mode accepts unsigned requests; real mode requires `x-bug-bot-signature: sha256=<HMAC-SHA256(raw-body)>`.
 
 ```bash
 curl -X POST http://localhost:3000/webhooks/jira \
