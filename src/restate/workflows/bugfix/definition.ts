@@ -36,7 +36,8 @@ import type { JiraClient } from "../../../integrations/jira/jira-client.js";
 import { normalizeJiraIssue } from "../../../integrations/jira/jira-normalizer.js";
 import type { ExecutionRunner, Workspace } from "../../../runner/execution-runner.js";
 import { WorkspaceManager, type WorkspaceInspection } from "../../../runner/workspace-manager.js";
-import { asTerminalDomainError, domainErrorCode } from "../../terminal-errors.js";
+
+const domainCodeMetadataKey = "ticket-bot.domain-code";
 
 interface WorkflowStateStore {
   workflowState?: BugFixWorkflowState;
@@ -68,7 +69,13 @@ export function createBugFixRestateWorkflow(
     options: {
       ingressPrivate: true,
       inactivityTimeout: inactivityTimeoutMinutes * 60_000,
-      asTerminalError: asTerminalDomainError,
+      asTerminalError: (error) =>
+        error instanceof DomainError
+          ? new restate.TerminalError(error.message, {
+              errorCode: 422,
+              metadata: { [domainCodeMetadataKey]: error.code },
+            })
+          : undefined,
     },
     handlers: {
       run: restate.handlers.workflow.workflow(
@@ -779,7 +786,12 @@ function createFailureState(
     "REPEATED_FAILURE",
     "CI_INFRASTRUCTURE_FAILURE",
   ];
-  const code = domainErrorCode(error);
+  const code =
+    error instanceof DomainError
+      ? error.code
+      : error instanceof restate.TerminalError
+        ? (error.metadata?.[domainCodeMetadataKey] as DomainErrorCode | undefined)
+        : undefined;
   return {
     runId,
     issueKey: input.issueKey,

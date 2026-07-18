@@ -302,7 +302,6 @@ The test suite reflects the architectural boundaries:
 - [`test/bugfix-queue.test.ts`](../test/bugfix-queue.test.ts): fixed paginated queue capture;
 - [`test/confidence-gate.test.ts`](../test/confidence-gate.test.ts): deterministic actionability rules;
 - [`test/repair-policy.test.ts`](../test/repair-policy.test.ts): CI repair decisions;
-- [`test/terminal-errors.test.ts`](../test/terminal-errors.test.ts): permanent domain-error mapping for Restate;
 - [`test/harness-result-parser.test.ts`](../test/harness-result-parser.test.ts): structured agent output validation;
 - [`test/restate-replay.integration.test.ts`](../test/restate-replay.integration.test.ts): queue and workflow behavior under Restate's always-replay mode;
 - [`test/webhook-validation.test.ts`](../test/webhook-validation.test.ts): ingress validation and payload limits.

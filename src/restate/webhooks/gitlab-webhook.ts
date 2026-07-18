@@ -1,7 +1,6 @@
 import * as restate from "@restatedev/restate-sdk";
 import { z } from "zod";
 import type { BugFixRestateWorkflow } from "../workflows/bugfix/definition.js";
-import { asTerminalValidationError } from "../terminal-errors.js";
 
 export const gitLabWebhookSchema = z.object({
   workflowId: z.string(),
@@ -15,7 +14,12 @@ export const gitLabWebhookSchema = z.object({
 export function createGitLabWebhookIngressService(workflow: BugFixRestateWorkflow) {
   return restate.service({
     name: "GitLabWebhook",
-    options: { asTerminalError: asTerminalValidationError },
+    options: {
+      asTerminalError: (error) =>
+        error instanceof z.ZodError
+          ? new restate.TerminalError(error.message, { errorCode: 400 })
+          : undefined,
+    },
     handlers: {
       receive: async (ctx: restate.Context, raw: unknown) => {
         const event = gitLabWebhookSchema.parse(raw);

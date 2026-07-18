@@ -1,7 +1,6 @@
 import * as restate from "@restatedev/restate-sdk";
 import { z } from "zod";
 import type { BugFixRestateWorkflow } from "../workflows/bugfix/definition.js";
-import { asTerminalValidationError } from "../terminal-errors.js";
 
 const finding = z.object({
   rule: z.string(),
@@ -25,7 +24,12 @@ const schema = z.object({
 export function createSonarQubeWebhookIngressService(workflow: BugFixRestateWorkflow) {
   return restate.service({
     name: "SonarQubeWebhook",
-    options: { asTerminalError: asTerminalValidationError },
+    options: {
+      asTerminalError: (error) =>
+        error instanceof z.ZodError
+          ? new restate.TerminalError(error.message, { errorCode: 400 })
+          : undefined,
+    },
     handlers: {
       receive: async (ctx: restate.Context, raw: unknown) => {
         const event = schema.parse(raw);

@@ -5,7 +5,6 @@ import type { BugFixQueue } from "../../domain/queue.js";
 import type { JiraClient } from "../../integrations/jira/jira-client.js";
 import type { BugFixRestateWorkflow } from "../workflows/bugfix/definition.js";
 import { workflowId } from "../workflows/bugfix/definition.js";
-import { asTerminalDomainError } from "../terminal-errors.js";
 
 const inputSchema = z.object({
   filterUrl: z.url(),
@@ -15,7 +14,13 @@ const inputSchema = z.object({
 export function createBugFixQueueRestateService(jira: JiraClient, workflow: BugFixRestateWorkflow) {
   return restate.service({
     name: "BugFixQueue",
-    options: { ingressPrivate: true, asTerminalError: asTerminalDomainError },
+    options: {
+      ingressPrivate: true,
+      asTerminalError: (error) =>
+        error instanceof DomainError
+          ? new restate.TerminalError(error.message, { errorCode: 422 })
+          : undefined,
+    },
     handlers: {
       run: async (ctx: restate.Context, raw: unknown) => {
         const input = inputSchema.parse(raw);

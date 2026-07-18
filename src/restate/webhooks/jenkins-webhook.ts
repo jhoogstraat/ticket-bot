@@ -2,7 +2,6 @@ import * as restate from "@restatedev/restate-sdk";
 import { z } from "zod";
 import { parseJenkinsFailure } from "../../integrations/jenkins/jenkins-failure-parser.js";
 import type { BugFixRestateWorkflow } from "../workflows/bugfix/definition.js";
-import { asTerminalValidationError } from "../terminal-errors.js";
 
 const schema = z.object({
   workflowId: z.string().min(1),
@@ -20,7 +19,12 @@ export const validateJenkinsWebhook = (value: unknown) => schema.parse(value);
 export function createJenkinsWebhookIngressService(workflow: BugFixRestateWorkflow) {
   return restate.service({
     name: "JenkinsWebhook",
-    options: { asTerminalError: asTerminalValidationError },
+    options: {
+      asTerminalError: (error) =>
+        error instanceof z.ZodError
+          ? new restate.TerminalError(error.message, { errorCode: 400 })
+          : undefined,
+    },
     handlers: {
       receive: async (ctx: restate.Context, raw: unknown) => {
         const event = validateJenkinsWebhook(raw);
