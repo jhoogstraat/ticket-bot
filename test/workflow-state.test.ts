@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { MergeRequest } from "../src/features/bugfix/merge-request.js";
+import type { MergeRequest } from "../src/domain/merge-request.js";
 import type { BugFixWorkflowState } from "../src/features/bugfix/workflow-state.js";
 import {
   done,

@@ -3,7 +3,7 @@ import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-import type { RepositoryConfig } from "../repository.js";
+import type { RepositoryConfig } from "../../../domain/repository.js";
 
 const execFileAsync = promisify(execFile);
 

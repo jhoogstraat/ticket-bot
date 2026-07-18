@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { filterSonarFindings } from "../src/integrations/sonarqube/sonar-finding-filter.js";
-import type { SonarFinding } from "../src/features/bugfix/ci.js";
+import type { SonarFinding } from "../src/domain/ci.js";
 
 const finding = (file: string, isNewCode: boolean, qualityGateFailure = false): SonarFinding => ({
   rule: "x",

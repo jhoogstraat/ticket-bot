@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { TicketAnalysis } from "../analysis.js";
+import type { TicketAnalysis } from "../features/bugfix/analysis.js";
 import type {
   AnalyzeHarnessTaskInput,
   CodingHarness,

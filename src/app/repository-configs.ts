@@ -1,5 +1,5 @@
-import type { RepositoryConfig } from "../features/bugfix/repository.js";
-import type { NormalizedBugTicket } from "../features/bugfix/ticket.js";
+import type { RepositoryConfig } from "../domain/repository.js";
+import type { NormalizedBugTicket } from "../domain/ticket.js";
 
 export const repositoryConfigs: RepositoryConfig[] = [
   {

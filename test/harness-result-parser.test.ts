@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { parseHarnessRunResult } from "../src/features/bugfix/coding/codex-result-parser.js";
+import { parseHarnessRunResult } from "../src/coding/codex-result-parser.js";
 describe("harness result validation", () => {
   it("accepts structured results", () =>
     expect(

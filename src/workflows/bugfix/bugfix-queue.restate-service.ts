@@ -1,9 +1,9 @@
 import * as restate from "@restatedev/restate-sdk";
 import { z } from "zod";
-import type { BugFixQueue } from "./queue.js";
+import type { BugFixQueue } from "../../domain/queue.js";
 import type { JiraClient } from "../../integrations/jira/jira-client.js";
-import type { BugFixRestateWorkflow } from "./bugfix.restate-workflow.js";
-import { workflowId } from "./bugfix.restate-workflow.js";
+import type { BugFixRestateWorkflow } from "./workflow.js";
+import { workflowId } from "./workflow.js";
 
 const inputSchema = z.object({
   filterUrl: z.url(),
@@ -18,6 +18,7 @@ export function createBugFixQueueRestateService(jira: JiraClient, workflow: BugF
     },
     handlers: {
       run: async (ctx: restate.Context, raw: unknown) => {
+
         const input = inputSchema.parse(raw);
         const queue = await ctx.run("capture-fixed-jira-queue", () =>
           captureBugFixQueue(jira, input.filterUrl, input.generation),

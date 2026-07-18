@@ -5,16 +5,16 @@ import {
   type ConfidenceGateDecision,
   type TicketAnalysis,
 } from "./analysis.js";
-import type { CompactCiFailure, SonarFinding } from "./ci.js";
+import type { CompactCiFailure, SonarFinding } from "../../domain/ci.js";
 import type {
   CodingHarness,
   HarnessReviewResult,
   HarnessRunResult,
-} from "./coding/coding-harness.js";
-import { usedTokens } from "./coding/coding-harness.js";
-import type { MergeRequest } from "./merge-request.js";
-import type { RepositoryConfig } from "./repository.js";
-import type { NormalizedBugTicket } from "./ticket.js";
+} from "../../coding/coding-harness.js";
+import { usedTokens } from "../../coding/coding-harness.js";
+import type { MergeRequest } from "../../domain/merge-request.js";
+import type { RepositoryConfig } from "../../domain/repository.js";
+import type { NormalizedBugTicket } from "../../domain/ticket.js";
 import {
   addTokenUsage,
   done,
@@ -33,8 +33,11 @@ import {
 import type { GitLabClient } from "../../integrations/gitlab/gitlab-client.js";
 import type { JiraClient } from "../../integrations/jira/jira-client.js";
 import { normalizeJiraIssue } from "../../integrations/jira/jira-normalizer.js";
-import type { RepositoryWorkspace, WorkspaceChanges } from "./workspace/local-git-workspaces.js";
-import { LocalGitWorkspaces } from "./workspace/local-git-workspaces.js";
+import type {
+  RepositoryWorkspace,
+  WorkspaceChanges,
+  LocalGitWorkspaces,
+} from "../../integrations/git/local-git-workspaces.js";
 
 interface WorkflowStateStore {
   workflowState?: BugFixWorkflowState;
@@ -70,6 +73,7 @@ export function createBugFixRestateWorkflow(
       run: restate.handlers.workflow.workflow(
         async (ctx: BugFixWorkflowContext, input: StartBugFixInput) => {
           const runId = workflowId(input.issueKey, input.generation);
+
           let state = await ctx.get("workflowState");
           if (state && isTerminal(state)) return workflowResult(runId, state);
 

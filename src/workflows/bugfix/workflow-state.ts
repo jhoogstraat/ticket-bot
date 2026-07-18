@@ -1,5 +1,5 @@
-import type { CompactCiFailure, CiResult, SonarFinding } from "./ci.js";
-import type { MergeRequest } from "./merge-request.js";
+import type { CompactCiFailure, CiResult, SonarFinding } from "../../domain/ci.js";
+import type { MergeRequest } from "../../domain/merge-request.js";
 import type { TicketAnalysis } from "./analysis.js";
 
 /** Stages before a change is ready for CI and external review. */

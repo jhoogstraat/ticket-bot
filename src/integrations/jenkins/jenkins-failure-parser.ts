@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { CiFailureCategory, CompactCiFailure } from "../../features/bugfix/ci.js";
+import type { CiFailureCategory, CompactCiFailure } from "../../domain/ci.js";
 
 export interface JenkinsParseInput {
   buildId: string;

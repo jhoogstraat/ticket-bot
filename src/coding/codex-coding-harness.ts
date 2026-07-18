@@ -1,5 +1,5 @@
 import { Codex, type RunResult, type ThreadOptions, type TurnOptions } from "@openai/codex-sdk";
-import type { TicketAnalysis } from "../analysis.js";
+import type { TicketAnalysis } from "../features/bugfix/analysis.js";
 import type {
   AnalyzeHarnessTaskInput,
   CodingHarness,

@@ -1,4 +1,4 @@
-import type { CreateMergeRequestInput, MergeRequest } from "../../features/bugfix/merge-request.js";
+import type { CreateMergeRequestInput, MergeRequest } from "../../domain/merge-request.js";
 
 export interface GitLabClient {
   createDraftMergeRequest(input: CreateMergeRequestInput): Promise<MergeRequest>;

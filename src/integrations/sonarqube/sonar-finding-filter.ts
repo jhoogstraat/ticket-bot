@@ -1,4 +1,4 @@
-import type { SonarFinding } from "../../features/bugfix/ci.js";
+import type { SonarFinding } from "../../domain/ci.js";
 
 const severityRanks: Readonly<Record<string, number>> = {
   blocker: 5,

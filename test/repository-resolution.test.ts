@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { resolveRepository } from "../src/app/repository-configs.js";
-import type { RepositoryConfig } from "../src/features/bugfix/repository.js";
-import type { NormalizedBugTicket } from "../src/features/bugfix/ticket.js";
+import type { RepositoryConfig } from "../src/domain/repository.js";
+import type { NormalizedBugTicket } from "../src/domain/ticket.js";
 
 const config: RepositoryConfig = {
   id: "checkout",

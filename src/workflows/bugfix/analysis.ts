@@ -1,4 +1,4 @@
-import type { NormalizedBugTicket } from "./ticket.js";
+import type { NormalizedBugTicket } from "../../domain/ticket.js";
 
 export type Confidence = "high" | "medium" | "low";
 
@@ -66,8 +66,8 @@ export function analysisMarkdown(
   return `# ${ticket.key}: ${ticket.summary}
 
 ## Verdict
-- Root cause: ${title(analysis.rootCauseConfidence)}
-- Proposed fix: ${title(analysis.proposedFixConfidence)}
+- Root cause: ${analysis.rootCauseConfidence}
+- Proposed fix: ${analysis.proposedFixConfidence}
 - Decision: ${decision.actionable ? "Assign and implement yes" : "Assign and implement no"}
 - Remaining uncertainty: ${analysis.missingInformation.join("; ") || "None"}
 
@@ -96,15 +96,11 @@ ${list(analysis.repositoryEvidence)}
 ${list(analysis.reproductionEvidence)}
 
 ## Complexity
-- Rating: ${title(analysis.complexity.rating)}
+- Rating: ${analysis.complexity.rating}
 - Reasoning: ${analysis.complexity.reasoning}
 - Main risks: ${analysis.complexity.risks.join("; ") || "None identified"}
 
 ## Missing information
 ${list(analysis.missingInformation)}
 ${decision.actionable ? "" : `\n## Human action required\n${analysis.humanRequest ?? decision.reason}\n`}`;
-}
-
-function title(value: string): string {
-  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }

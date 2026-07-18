@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { CompactCiFailure } from "../src/features/bugfix/ci.js";
+import type { CompactCiFailure } from "../src/domain/ci.js";
 import {
   emptyTokenUsage,
   type BugFixWorkflowState,

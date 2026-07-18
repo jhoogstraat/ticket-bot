@@ -1,6 +1,6 @@
-import type { CompactCiFailure, SonarFinding } from "../ci.js";
-import type { TicketAnalysis } from "../analysis.js";
-import type { NormalizedBugTicket } from "../ticket.js";
+import type { CompactCiFailure, SonarFinding } from "../domain/ci.js";
+import type { TicketAnalysis } from "../features/bugfix/analysis.js";
+import type { NormalizedBugTicket } from "../domain/ticket.js";
 
 export interface HarnessUsage {
   inputTokens?: number;
