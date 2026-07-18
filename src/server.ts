@@ -3,7 +3,7 @@ import { startWebhookApi } from "./api/webhook-api.js";
 import { loadEnvironment } from "./config/environment.js";
 import { repositoryConfigs, resolveRepository } from "./config/repositories.js";
 import { CodexHarness } from "./harness/codex-harness.js";
-import { FakeCodexHarness } from "./harness/fake-codex-harness.js";
+import { FakeCodingHarness } from "./harness/fake-coding-harness.js";
 import { FakeGitLabClient, HttpGitLabClient } from "./integrations/gitlab/gitlab-client.js";
 import { FakeJiraClient, HttpJiraClient } from "./integrations/jira/jira-client.js";
 import type { JiraIssueDto } from "./integrations/jira/jira-types.js";
@@ -15,8 +15,6 @@ import { createJenkinsWebhookIngressService } from "./restate/webhooks/jenkins-w
 import { createJiraWebhookIngressService } from "./restate/webhooks/jira-webhook.js";
 import { createSonarQubeWebhookIngressService } from "./restate/webhooks/sonarqube-webhook.js";
 import { createBugFixRestateWorkflow } from "./restate/workflows/bugfix/definition.js";
-import { BugFixQueueCapture } from "./application/bugfix-queue-capture.js";
-import { BugFixApplication } from "./application/bugfix-application.js";
 
 const env = loadEnvironment();
 const fakeIssue: JiraIssueDto = {
@@ -57,23 +55,25 @@ const gitlab =
 const harness =
   env.HARNESS_MODE === "codex"
     ? new CodexHarness(env.CODEX_TIMEOUT_MINUTES)
-    : new FakeCodexHarness();
+    : new FakeCodingHarness();
 const workspaceManager = new WorkspaceManager(env.WORKSPACE_ROOT, env.KEEP_WORKSPACES);
 const runner = new LocalRunner(workspaceManager);
-const bugFixApplication = new BugFixApplication(
-  jira,
-  gitlab,
-  harness,
-  runner,
-  workspaceManager,
-  (ticket) => resolveRepository(ticket, repositoryConfigs),
-  env.ACTIONABLE_REPOSITORY_ID,
+const workflow = createBugFixRestateWorkflow(
+  {
+    jira,
+    gitlab,
+    harness,
+    runner,
+    workspaces: workspaceManager,
+    resolveRepository: (ticket) => resolveRepository(ticket, repositoryConfigs),
+    actionableRepositoryId: env.ACTIONABLE_REPOSITORY_ID,
+  },
+  {
+    inactivityTimeoutMinutes: env.CODEX_TIMEOUT_MINUTES + 5,
+    callbackTimeoutMinutes: env.CALLBACK_TIMEOUT_MINUTES,
+  },
 );
-const workflow = createBugFixRestateWorkflow(bugFixApplication, {
-  inactivityTimeoutMinutes: env.CODEX_TIMEOUT_MINUTES + 5,
-  callbackTimeoutMinutes: env.CALLBACK_TIMEOUT_MINUTES,
-});
-const queue = createBugFixQueueRestateService(new BugFixQueueCapture(jira), workflow);
+const queue = createBugFixQueueRestateService(jira, workflow);
 const jiraWebhook = createJiraWebhookIngressService(workflow);
 const jenkinsWebhook = createJenkinsWebhookIngressService(workflow);
 const sonarQubeWebhook = createSonarQubeWebhookIngressService(workflow);

@@ -16,6 +16,7 @@
     "start": "bun dist/src/server.js",
     "test": "bun test ./test/*.test.ts",
     "test:restate": "RUN_RESTATE_TESTS=1 bun test ./test/restate-replay.integration.test.ts",
+    "test:restate:apple": "RESTATE_CONTAINER_RUNTIME=apple RUN_RESTATE_TESTS=1 bun test ./test/restate-replay.integration.test.ts",
     "test:watch": "bun test --watch ./test/*.test.ts",
     "lint": "bun x --bun eslint .",
     "check": "bun run format:check && bun run lint && bun run build && bun run test"

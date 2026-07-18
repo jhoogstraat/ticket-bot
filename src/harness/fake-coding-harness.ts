@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import type { TicketAnalysis } from "../domain/analysis.js";
 import type {
   AnalyzeHarnessTaskInput,
@@ -13,11 +13,12 @@ import type {
   StartHarnessTaskInput,
 } from "../domain/harness.js";
 
-export class FakeCodexHarness implements CodingHarness {
+export class FakeCodingHarness implements CodingHarness {
   readonly analyses: AnalyzeHarnessTaskInput[] = [];
   readonly starts: StartHarnessTaskInput[] = [];
   readonly continuations: ContinueHarnessTaskInput[] = [];
   readonly revisions: ReviseHarnessTaskInput[] = [];
+
   async analyzeTask(input: AnalyzeHarnessTaskInput): Promise<TicketAnalysis> {
     this.analyses.push(structuredClone(input));
     return {
@@ -38,6 +39,7 @@ export class FakeCodexHarness implements CodingHarness {
       missingInformation: [],
     };
   }
+
   async startTask(input: StartHarnessTaskInput): Promise<HarnessRunResult> {
     this.starts.push(structuredClone(input));
     const relative = `.ticket-bot/${input.ticket.key}.txt`;
@@ -57,6 +59,7 @@ export class FakeCodexHarness implements CodingHarness {
       usage: { inputTokens: 100, outputTokens: 50 },
     };
   }
+
   async continueTask(
     sessionId: string,
     input: ContinueHarnessTaskInput,
@@ -77,6 +80,7 @@ export class FakeCodexHarness implements CodingHarness {
       usage: { inputTokens: 30, outputTokens: 20 },
     };
   }
+
   async reviseTask(sessionId: string, input: ReviseHarnessTaskInput): Promise<HarnessRunResult> {
     this.revisions.push(structuredClone(input));
     const relative = `.ticket-bot/review-revision-${this.revisions.length}.txt`;
@@ -89,6 +93,7 @@ export class FakeCodexHarness implements CodingHarness {
       validation: { commandsRun: ["fake:test"], succeeded: true, failures: [] },
     };
   }
+
   async review(_input: ReviewHarnessTaskInput): Promise<HarnessReviewResult> {
     return {
       sessionId: randomUUID(),
@@ -97,8 +102,5 @@ export class FakeCodexHarness implements CodingHarness {
       findings: [],
       usage: { inputTokens: 40, outputTokens: 10 },
     };
-  }
-  cancel(_sessionId: string): Promise<void> {
-    return Promise.resolve();
   }
 }

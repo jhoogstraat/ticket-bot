@@ -9,7 +9,6 @@ flowchart TD
     Server["server.ts: composition root"]
     Queue["BugFixQueue: capture fixed Jira queue"]
     Workflow["BugFixWorkflow: one durable execution per ticket"]
-    Service["BugFixApplication: ticket-level application operations"]
     Domain["Domain policies: confidence gate and repair decisions"]
     Harness["CodingHarness: investigate, implement, repair, review"]
     Runner["ExecutionRunner and WorkspaceManager"]
@@ -19,11 +18,10 @@ flowchart TD
     Server --> Queue
     Server --> Workflow
     Queue --> Workflow
-    Workflow --> Service
-    Service --> Domain
-    Service --> Harness
-    Service --> Runner
-    Service --> Adapters
+    Workflow --> Domain
+    Workflow --> Harness
+    Workflow --> Runner
+    Workflow --> Adapters
     Callbacks --> Workflow
 ```
 
@@ -51,7 +49,7 @@ Jira filter URL
 - selects fake or HTTP Jira and GitLab adapters;
 - selects the fake or Codex harness;
 - creates the workspace manager and execution runner;
-- constructs `BugFixApplication`;
+- supplies the workflow's concrete dependencies;
 - registers the queue workflow, per-ticket workflow, and webhook services;
 - registers the Restate endpoint with `restate.serve` and exposes the public webhook API through `Bun.serve`.
 
@@ -68,7 +66,7 @@ Use `bun run dev` during development or `bun run start` for the built applicatio
 }
 ```
 
-[`BugFixQueueCapture`](../src/application/bugfix-queue-capture.ts) reads every Jira result page, deduplicates ticket keys, and returns a fixed queue. The Restate service then starts one independent `BugFixWorkflow` for each captured ticket.
+The service reads every Jira result page, deduplicates ticket keys, and returns a fixed queue before starting one independent `BugFixWorkflow` per ticket.
 
 The queue is captured once inside a journaled `ctx.run`. Tickets added to the Jira filter afterward are not silently appended to an active run.
 
@@ -84,7 +82,7 @@ The MCP server is optional and is not called directly by the main workflow. Its 
 
 ## How Restate is used
 
-The central integration is [`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts). Restate supplies durable identity, state, side-effect journaling, and callback waits. The handler delegates the lifecycle to [`initial-fix-phase.ts`](../src/restate/workflows/bugfix/phases/initial-fix.ts), [`review-phase.ts`](../src/restate/workflows/bugfix/phases/review.ts), [`ci-repair-phase.ts`](../src/restate/workflows/bugfix/phases/ci-repair.ts), and [`completion-phase.ts`](../src/restate/workflows/bugfix/phases/completion.ts), so each phase can be read independently without hiding its journaled operations.
+The central integration is [`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts). It is the single owner of the sequential ticket lifecycle: state, journaled operations, callback waits, repair policy, and terminal outcomes.
 
 ### Durable identity
 
@@ -194,7 +192,7 @@ Prompts live in [`src/harness/harness-prompts.ts`](../src/harness/harness-prompt
 
 ### Fake harness
 
-[`src/harness/fake-codex-harness.ts`](../src/harness/fake-codex-harness.ts) implements the same interface without calling Codex. It supports deterministic local development and integration tests.
+[`src/harness/fake-coding-harness.ts`](../src/harness/fake-coding-harness.ts) implements the same interface without calling an external coding provider. It supports deterministic local development and integration tests.
 
 ### MCP SDK
 
@@ -206,27 +204,9 @@ The following files contain the behavior that defines the bugfix process.
 
 ### Durable orchestration
 
-[`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts) owns high-level ordering and durable state transitions. Its phase modules decide the detailed steps for initial implementation, independent review, CI repair, and final handoff. Together they decide when to investigate, gate, claim, review, publish, repair, wait, stop, or hand off.
+[`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts) owns the complete durable lifecycle. Its `run` handler reads as a sequence of ticket loading, investigation, gating, implementation, review, publication, callback waits, repair, and handoff steps.
 
 This is the most important file for understanding the end-to-end behavior.
-
-### Ticket-level application service
-
-[`src/application/bugfix-application.ts`](../src/application/bugfix-application.ts) coordinates individual operations without depending on Restate. It:
-
-- loads and normalizes Jira evidence;
-- resolves the target repository;
-- creates the investigation workspace;
-- invokes the investigation harness;
-- applies the confidence gate and writes `ANALYSIS.md`;
-- claims the Jira ticket and activates the focused branch;
-- invokes implementation and review;
-- validates, commits, and pushes changes;
-- creates the merge request;
-- performs repair operations;
-- transitions Jira to Ready to merge.
-
-Keeping Restate out of this class makes the application behavior easier to test directly.
 
 ### Confidence policy
 
@@ -240,7 +220,7 @@ Keeping Restate out of this class makes the application behavior easier to test 
 
 ### Repair policy
 
-[`src/restate/workflows/bugfix/phases/repair-policy.ts`](../src/restate/workflows/bugfix/phases/repair-policy.ts) determines whether a Jenkins failure may trigger another code change. It stops for infrastructure failures, repeated unchanged failures, and exhausted repair limits.
+The workflow's `decideRepair` policy determines whether a Jenkins failure may trigger another code change. It stops for infrastructure failures, repeated unchanged failures, and exhausted repair limits.
 
 ### Domain contracts
 
@@ -266,7 +246,7 @@ Infrastructure performs I/O or supplies an execution mechanism. These components
 | GitLab HTTP API                        | [`src/integrations/gitlab/gitlab-client.ts`](../src/integrations/gitlab/gitlab-client.ts) |
 | Jenkins client and log parsing         | [`src/integrations/jenkins`](../src/integrations/jenkins)                                 |
 | SonarQube client and finding filtering | [`src/integrations/sonarqube`](../src/integrations/sonarqube)                             |
-| Webhook validation and delivery        | [`src/webhooks`](../src/webhooks)                                                         |
+| Webhook validation and delivery        | [`src/restate/webhooks`](../src/restate/webhooks)                                         |
 | Runner abstraction                     | [`src/runner/execution-runner.ts`](../src/runner/execution-runner.ts)                     |
 | Local runner                           | [`src/runner/local-runner.ts`](../src/runner/local-runner.ts)                             |
 | Git workspace operations               | [`src/runner/workspace-manager.ts`](../src/runner/workspace-manager.ts)                   |
@@ -322,8 +302,9 @@ The test suite reflects the architectural boundaries:
 - [`test/bugfix-queue.test.ts`](../test/bugfix-queue.test.ts): fixed paginated queue capture;
 - [`test/confidence-gate.test.ts`](../test/confidence-gate.test.ts): deterministic actionability rules;
 - [`test/repair-policy.test.ts`](../test/repair-policy.test.ts): CI repair decisions;
+- [`test/terminal-errors.test.ts`](../test/terminal-errors.test.ts): permanent domain-error mapping for Restate;
 - [`test/harness-result-parser.test.ts`](../test/harness-result-parser.test.ts): structured agent output validation;
-- [`test/vertical-slice.integration.test.ts`](../test/vertical-slice.integration.test.ts): Jira normalization through isolated Git branch, review, push, and draft MR;
+- [`test/restate-replay.integration.test.ts`](../test/restate-replay.integration.test.ts): queue and workflow behavior under Restate's always-replay mode;
 - [`test/webhook-validation.test.ts`](../test/webhook-validation.test.ts): ingress validation and payload limits.
 
 Run the complete verification suite with:
@@ -338,11 +319,9 @@ For a first pass through the code, use this order:
 
 1. [`src/server.ts`](../src/server.ts) — see how the application is assembled.
 2. [`src/restate/services/bugfix-queue.ts`](../src/restate/services/bugfix-queue.ts) — see how filter runs fan out.
-3. [`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts) — follow the thin durable lifecycle coordinator.
-4. [`src/restate/workflows/bugfix/phases/initial-fix.ts`](../src/restate/workflows/bugfix/phases/initial-fix.ts), [`src/restate/workflows/bugfix/phases/review.ts`](../src/restate/workflows/bugfix/phases/review.ts), [`src/restate/workflows/bugfix/phases/ci-repair.ts`](../src/restate/workflows/bugfix/phases/ci-repair.ts), and [`src/restate/workflows/bugfix/phases/completion.ts`](../src/restate/workflows/bugfix/phases/completion.ts) — read one lifecycle phase at a time.
-5. [`src/application/bugfix-application.ts`](../src/application/bugfix-application.ts) — inspect each ticket operation.
-6. [`src/domain/analysis.ts`](../src/domain/analysis.ts) and [`src/restate/workflows/bugfix/phases/repair-policy.ts`](../src/restate/workflows/bugfix/phases/repair-policy.ts) — understand deterministic policy.
-7. [`src/domain/harness.ts`](../src/domain/harness.ts) and [`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts) — understand the agent boundary.
-8. [`src/runner/workspace-manager.ts`](../src/runner/workspace-manager.ts) and [`src/integrations`](../src/integrations) — inspect execution and external-system infrastructure.
+3. [`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts) — follow the complete sequential lifecycle.
+4. [`src/domain/analysis.ts`](../src/domain/analysis.ts) and [`src/domain/workflow.ts`](../src/domain/workflow.ts) — understand deterministic policy and durable state.
+5. [`src/domain/harness.ts`](../src/domain/harness.ts) and [`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts) — understand the agent boundary.
+6. [`src/runner/workspace-manager.ts`](../src/runner/workspace-manager.ts) and [`src/integrations`](../src/integrations) — inspect execution and external-system infrastructure.
 
 For the workflow requirements and stage invariants, also see [`docs/architecture.md`](./architecture.md).
