@@ -1,8 +1,8 @@
 import type { HarnessRunResult } from "../../../coding/coding-harness.js";
 import type { MergeRequest } from "../../../domain/merge-request.js";
-import type { RepositoryConfig } from "../../../domain/repository.js";
+import { repositoryProjectPath, type RepositoryTarget } from "../../../domain/repository.js";
 import type { NormalizedBugTicket } from "../../../domain/ticket.js";
-import type { GitLabClient } from "../../../integrations/gitlab/gitlab-client.js";
+import type { ForgeClients } from "../../../integrations/forge/forge-client.js";
 import type { JiraClient } from "../../../integrations/jira/jira-client.js";
 
 function mergeRequestDescription(ticket: NormalizedBugTicket, result: HarnessRunResult): string {
@@ -11,22 +11,24 @@ function mergeRequestDescription(ticket: NormalizedBugTicket, result: HarnessRun
 
 export class PublicationTask {
   constructor(
-    private readonly gitlab: GitLabClient,
+    private readonly forges: ForgeClients,
     private readonly jira: JiraClient,
   ) {}
 
   async createMergeRequest(
     runId: string,
     ticket: NormalizedBugTicket,
-    repository: RepositoryConfig,
+    repository: RepositoryTarget,
     sourceBranch: string,
+    targetBranch: string,
     result: HarnessRunResult,
   ): Promise<MergeRequest> {
-    return await this.gitlab.createMergeRequest({
+    return await this.forges[repository.forge].createMergeRequest({
       idempotencyKey: runId,
-      projectId: repository.gitlabProjectId,
+      projectId: repositoryProjectPath(repository),
+      repositoryUrl: repository.url,
       sourceBranch,
-      targetBranch: repository.defaultBranch,
+      targetBranch,
       title: `${ticket.key}: ${ticket.summary}`,
       description: mergeRequestDescription(ticket, result),
       draft: true,

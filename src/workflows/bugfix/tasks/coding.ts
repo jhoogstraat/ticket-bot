@@ -5,7 +5,7 @@ import type {
   HarnessRunResult,
 } from "../../../coding/coding-harness.js";
 import type { SonarFinding } from "../../../domain/ci.js";
-import type { RepositoryConfig } from "../../../domain/repository.js";
+import type { BugFixLimits } from "../../../domain/limits.js";
 import type { TicketAnalysis } from "../../../domain/ticket-analysis.js";
 import type { NormalizedBugTicket } from "../../../domain/ticket.js";
 import type {
@@ -18,11 +18,11 @@ export class CodingTask {
   constructor(
     private readonly harness: CodingHarness,
     private readonly workspaces: LocalGitWorkspaces,
+    private readonly limits: BugFixLimits,
   ) {}
 
   async implementTicket(
     ticket: NormalizedBugTicket,
-    repository: RepositoryConfig,
     workspace: RepositoryWorkspace,
     analysis: TicketAnalysis,
   ): Promise<HarnessRunResult> {
@@ -30,11 +30,10 @@ export class CodingTask {
       ticket,
       approvedAnalysis: analysis,
       workspacePath: workspace.path,
-      repositoryInstructions: repositoryInstructions(repository),
       limits: {
-        maxAgentTurns: repository.limits.maxAgentTurns,
-        maxChangedFiles: repository.limits.maxChangedFiles,
-        maxExecutionMinutes: repository.limits.maxExecutionMinutes,
+        maxAgentTurns: this.limits.maxAgentTurns,
+        maxChangedFiles: this.limits.maxChangedFiles,
+        maxExecutionMinutes: this.limits.maxExecutionMinutes,
       },
     });
 
@@ -45,15 +44,9 @@ export class CodingTask {
   async commitImplementation(
     workspace: RepositoryWorkspace,
     ticket: NormalizedBugTicket,
-    repository: RepositoryConfig,
     result: HarnessRunResult,
   ): Promise<void> {
-    await this.commitValidatedPatch(
-      workspace,
-      repository,
-      result,
-      `fix(${ticket.key}): ${ticket.summary}`,
-    );
+    await this.commitValidatedPatch(workspace, result, `fix(${ticket.key}): ${ticket.summary}`);
   }
 
   async reviewPatch(
@@ -80,10 +73,9 @@ export class CodingTask {
     sessionId: string,
     reviewAttempt: number,
     ticket: NormalizedBugTicket,
-    repository: RepositoryConfig,
     review: HarnessReviewResult,
   ): Promise<void> {
-    if (reviewAttempt >= repository.limits.maxRepairAttempts)
+    if (reviewAttempt >= this.limits.maxRepairAttempts)
       throw new restate.TerminalError("Review revision limit reached");
 
     const before = await this.workspaces.inspectChangesSinceBase(workspace);
@@ -96,7 +88,6 @@ export class CodingTask {
 
     await this.commitValidatedPatch(
       workspace,
-      repository,
       result,
       `fix(${ticket.key}): repair review findings`,
     );
@@ -104,12 +95,11 @@ export class CodingTask {
 
   private async commitValidatedPatch(
     workspace: RepositoryWorkspace,
-    repository: RepositoryConfig,
     result: HarnessRunResult,
     message: string,
   ): Promise<void> {
     validateHarnessResult(result);
-    validatePatch(await this.workspaces.inspectPendingChanges(workspace), repository);
+    validatePatch(await this.workspaces.inspectPendingChanges(workspace), this.limits);
     await this.workspaces.commitChanges(workspace, message);
   }
 }
@@ -123,22 +113,14 @@ function validateHarnessResult(result: HarnessRunResult): void {
     throw new restate.TerminalError(result.validation.failures.join("; "));
 }
 
-function validatePatch(inspection: WorkspaceChanges, repository: RepositoryConfig): void {
+function validatePatch(inspection: WorkspaceChanges, limits: BugFixLimits): void {
   if (inspection.changedFiles.length === 0)
     throw new restate.TerminalError("Harness completed without changing files");
 
-  if (inspection.changedFiles.length > repository.limits.maxChangedFiles)
+  if (inspection.changedFiles.length > limits.maxChangedFiles)
     throw new restate.TerminalError(
-      `Patch changed ${inspection.changedFiles.length} files; limit is ${repository.limits.maxChangedFiles}`,
+      `Patch changed ${inspection.changedFiles.length} files; limit is ${limits.maxChangedFiles}`,
     );
-}
-
-function repositoryInstructions(repository: RepositoryConfig) {
-  return {
-    buildCommands: repository.buildCommands,
-    testCommands: repository.testCommands,
-    lintCommands: repository.lintCommands,
-  };
 }
 
 function ticketSummary(ticket: NormalizedBugTicket) {

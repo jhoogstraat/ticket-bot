@@ -1,6 +1,7 @@
 import { CodexHarness } from "../../coding/codex-coding-harness.js";
 import { FakeCodingHarness } from "../../coding/fake-coding-harness.js";
 import { LocalGitWorkspaces } from "../../integrations/git/local-git-workspaces.js";
+import { FakeGitHubClient, HttpGitHubClient } from "../../integrations/github/github-client.js";
 import { FakeGitLabClient, HttpGitLabClient } from "../../integrations/gitlab/gitlab-client.js";
 import { FakeJiraClient, HttpJiraClient } from "../../integrations/jira/jira-client.js";
 import type { JiraIssueDto } from "../../integrations/jira/jira-types.js";
@@ -36,13 +37,13 @@ export const jira =
       )
     : new FakeJiraClient(new Map([[demoIssue.key, demoIssue]]));
 
-export const gitlab =
+export const forges =
   environment.ADAPTER_MODE === "real"
-    ? new HttpGitLabClient(
-        required(environment.GITLAB_BASE_URL, "GITLAB_BASE_URL"),
-        required(environment.GITLAB_TOKEN, "GITLAB_TOKEN"),
-      )
-    : new FakeGitLabClient();
+    ? {
+        github: new HttpGitHubClient(environment.GITHUB_TOKEN),
+        gitlab: new HttpGitLabClient(environment.GITLAB_TOKEN),
+      }
+    : { github: new FakeGitHubClient(), gitlab: new FakeGitLabClient() };
 
 export const codingHarness =
   environment.HARNESS_MODE === "codex"
@@ -51,4 +52,11 @@ export const codingHarness =
 
 export const workspaces = new LocalGitWorkspaces(environment.WORKSPACE_ROOT);
 
-export const actionableRepositoryId = environment.ACTIONABLE_REPOSITORY_ID;
+export const trustedRepositoryUrlPrefixes = environment.TRUSTED_REPOSITORY_URL_PREFIXES;
+
+export const limits = {
+  maxAgentTurns: environment.MAX_AGENT_TURNS,
+  maxChangedFiles: environment.MAX_CHANGED_FILES,
+  maxRepairAttempts: environment.MAX_REPAIR_ATTEMPTS,
+  maxExecutionMinutes: environment.MAX_EXECUTION_MINUTES,
+};

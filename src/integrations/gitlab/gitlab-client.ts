@@ -1,18 +1,17 @@
 import type { CreateMergeRequestInput, MergeRequest } from "../../domain/merge-request.js";
+import type { ForgeClient } from "../forge/forge-client.js";
 
-export interface GitLabClient {
-  createMergeRequest(input: CreateMergeRequestInput): Promise<MergeRequest>;
-}
-
-export class HttpGitLabClient implements GitLabClient {
-  constructor(
-    private readonly baseUrl: string,
-    private readonly token: string,
-  ) {}
+export class HttpGitLabClient implements ForgeClient {
+  constructor(private readonly token: string | undefined) {}
   async createMergeRequest(input: CreateMergeRequestInput): Promise<MergeRequest> {
-    const assigneeId = input.assignToCurrentUser ? await this.currentUserId() : undefined;
+    if (!this.token) throw new Error("GITLAB_TOKEN is required for GitLab repositories");
+    const baseUrl = new URL(input.repositoryUrl).origin;
+    const assigneeId = input.assignToCurrentUser
+      ? await this.currentUserId(baseUrl, this.token)
+      : undefined;
+
     const response = await fetch(
-      `${this.baseUrl}/api/v4/projects/${encodeURIComponent(input.projectId)}/merge_requests`,
+      `${baseUrl}/api/v4/projects/${encodeURIComponent(input.projectId)}/merge_requests`,
       {
         method: "POST",
         headers: {
@@ -37,9 +36,9 @@ export class HttpGitLabClient implements GitLabClient {
     const body = (await response.json()) as { iid: number; web_url: string };
     return { projectId: input.projectId, iid: body.iid, url: body.web_url };
   }
-  private async currentUserId(): Promise<number> {
-    const response = await fetch(`${this.baseUrl}/api/v4/user`, {
-      headers: { "private-token": this.token },
+  private async currentUserId(baseUrl: string, token: string): Promise<number> {
+    const response = await fetch(`${baseUrl}/api/v4/user`, {
+      headers: { "private-token": token },
       signal: AbortSignal.timeout(20_000),
     });
 
@@ -48,7 +47,7 @@ export class HttpGitLabClient implements GitLabClient {
   }
 }
 
-export class FakeGitLabClient implements GitLabClient {
+export class FakeGitLabClient implements ForgeClient {
   readonly created: CreateMergeRequestInput[] = [];
   async createMergeRequest(input: CreateMergeRequestInput): Promise<MergeRequest> {
     const existing = this.created.findIndex((item) => item.idempotencyKey === input.idempotencyKey);

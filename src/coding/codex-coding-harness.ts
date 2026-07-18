@@ -44,15 +44,10 @@ interface InvocationResult {
 export class CodexHarness implements CodingHarness {
   private readonly codex: CodexClient;
 
-  constructor(
-    private readonly timeoutMinutes = 45,
-    codex?: CodexClient,
-  ) {
-    this.codex =
-      codex ??
-      new Codex({
-        env: codexEnvironment(),
-      });
+  constructor(private readonly timeoutMinutes = 45) {
+    this.codex = new Codex({
+      env: codexEnvironment(),
+    });
   }
 
   async analyzeTask(input: AnalyzeHarnessTaskInput): Promise<TicketAnalysis> {
@@ -172,7 +167,12 @@ export class CodexHarness implements CodingHarness {
 function codexEnvironment(): Record<string, string> {
   const environment: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env)) {
-    if (value !== undefined && name !== "JIRA_TOKEN" && name !== "GITLAB_TOKEN")
+    if (
+      value !== undefined &&
+      name !== "JIRA_TOKEN" &&
+      name !== "GITLAB_TOKEN" &&
+      name !== "GITHUB_TOKEN"
+    )
       environment[name] = value;
   }
 

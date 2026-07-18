@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import * as clients from "@restatedev/restate-sdk-clients";
 import * as restate from "@restatedev/restate-sdk";
@@ -18,10 +19,14 @@ import { FakeCodingHarness } from "../src/coding/fake-coding-harness.js";
 import type { AnalyzeHarnessTaskInput } from "../src/coding/coding-harness.js";
 import { FakeGitLabClient } from "../src/integrations/gitlab/gitlab-client.js";
 import { LocalGitWorkspaces } from "../src/integrations/git/local-git-workspaces.js";
-import type { RepositoryConfig } from "../src/domain/repository.js";
-import type { BugFixWorkflowResult } from "../src/workflows/bugfix/workflow.js";
+import type { RepositoryTarget } from "../src/domain/repository.js";
+import type {
+  BugFixWorkflowInput,
+  BugFixWorkflowResult,
+} from "../src/workflows/bugfix/workflow.js";
 
 const exec = promisify(execFile);
+let productionRepository: RepositoryTarget;
 
 const issue: JiraIssueDto = {
   key: "ABC-1",
@@ -62,7 +67,7 @@ const workflowIssues: JiraIssueDto[] = [
 const queueTarget = restate.workflow({
   name: "QueueReplayTarget",
   handlers: {
-    run: async (_ctx: restate.WorkflowContext, issueKey: string) => issueKey,
+    run: async (_ctx: restate.WorkflowContext, input: BugFixWorkflowInput) => input.issueKey,
   },
 });
 
@@ -71,15 +76,17 @@ let queue: ReturnType<typeof createBugFixQueueRestateService>;
 type ProductionWorkflowDefinition = restate.WorkflowDefinition<
   "BugFixWorkflow",
   {
-    run: (ctx: restate.WorkflowContext, issueKey: string) => Promise<BugFixWorkflowResult>;
+    run: (ctx: restate.WorkflowContext, input: unknown) => Promise<BugFixWorkflowResult>;
   }
 >;
 
 const queueInvoker = restate.service({
   name: "QueueReplayInvoker",
   handlers: {
-    run: async (ctx: restate.Context, input: { filterUrl: string; generation: number }) =>
-      await ctx.serviceClient(queue).run(input),
+    run: async (
+      ctx: restate.Context,
+      input: { filterUrl: string; generation: number; forge: "gitlab"; url: string },
+    ) => await ctx.serviceClient(queue).run(input),
   },
 });
 
@@ -96,11 +103,6 @@ describeWithRestate("Restate always-replay integration", () => {
     fixtureRoot = fixture.root;
 
     await mock.module("../src/workflows/bugfix/dependencies.js", () => fixture.dependencies);
-    await mock.module("../src/app/repository-configs.js", () => ({
-      repositoryConfigs: [fixture.repository],
-      resolveRepository: () => fixture.repository,
-    }));
-
     ({ BugFixWorkflow: productionWorkflow } = await import("../src/workflows/bugfix/workflow.js"));
     const { createBugFixQueueRestateService } =
       await import("../src/entrypoints/bugfix-queue.restate-service.js");
@@ -130,11 +132,13 @@ describeWithRestate("Restate always-replay integration", () => {
     const queueResult = await ingress.serviceClient(queueInvoker).run({
       filterUrl: "https://jira.example.test/issues/?filter=1",
       generation: 3,
+      forge: "gitlab",
+      url: "https://gitlab.example.test/group/project.git",
     });
 
     expect(queueResult.entries).toEqual([{ issueKey: "ABC-1", generation: 3 }]);
     const workflowResult = await ingress
-      .workflowClient(queueTarget, "bugfix/ABC-1")
+      .workflowClient(queueTarget, "bugfix/ABC-1/3")
       .workflowAttach();
 
     expect(workflowResult).toBe("ABC-1");
@@ -161,11 +165,11 @@ async function callProductionWorkflow(
   ingress: clients.Ingress,
   issueKey: string,
 ): Promise<BugFixWorkflowResult> {
-  return await ingress.call<string, BugFixWorkflowResult>({
+  return await ingress.call<BugFixWorkflowInput, BugFixWorkflowResult>({
     service: "BugFixWorkflow",
     handler: "run",
-    key: `bugfix/${issueKey}`,
-    parameter: issueKey,
+    key: `bugfix/${issueKey}/1`,
+    parameter: { issueKey, generation: 1, ...productionRepository },
   });
 }
 
@@ -193,23 +197,12 @@ async function createProductionWorkflowFixture() {
   await exec("git", ["remote", "add", "origin", remote], { cwd: seed });
   await exec("git", ["push", "origin", "main"], { cwd: seed });
 
-  const repository: RepositoryConfig = {
-    id: "bug-bot",
-    jiraComponents: ["Bug Bot"],
-    cloneUrl: remote,
-    gitlabProjectId: "local/bug-bot",
-    defaultBranch: "main",
-    buildCommands: [],
-    testCommands: [],
-    lintCommands: [],
-    harness: "codex",
-    limits: {
-      maxAgentTurns: 5,
-      maxChangedFiles: 5,
-      maxRepairAttempts: 2,
-      maxExecutionMinutes: 5,
-    },
+  const repository: RepositoryTarget = {
+    forge: "gitlab",
+    url: pathToFileURL(remote).href,
   };
+
+  productionRepository = repository;
 
   const jira = new FakeJiraClient(new Map(workflowIssues.map((item) => [item.key, item])));
 
@@ -218,10 +211,16 @@ async function createProductionWorkflowFixture() {
     repository,
     dependencies: {
       jira,
-      gitlab: new FakeGitLabClient(),
+      forges: { github: new FakeGitLabClient(), gitlab: new FakeGitLabClient() },
       codingHarness: new ReplayCodingHarness(),
       workspaces: new LocalGitWorkspaces(join(root, "workspaces")),
-      actionableRepositoryId: repository.id,
+      trustedRepositoryUrlPrefixes: [repository.url],
+      limits: {
+        maxAgentTurns: 5,
+        maxChangedFiles: 5,
+        maxRepairAttempts: 2,
+        maxExecutionMinutes: 5,
+      },
     },
   };
 }

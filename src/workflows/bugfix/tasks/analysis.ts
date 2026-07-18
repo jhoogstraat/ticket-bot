@@ -1,6 +1,7 @@
 import * as restate from "@restatedev/restate-sdk";
 import type { CodingHarness } from "../../../coding/coding-harness.js";
-import type { RepositoryConfig } from "../../../domain/repository.js";
+import type { BugFixLimits } from "../../../domain/limits.js";
+import type { RepositoryTarget } from "../../../domain/repository.js";
 import type { NormalizedBugTicket } from "../../../domain/ticket.js";
 import type { TicketAnalysis } from "../../../domain/ticket-analysis.js";
 import type {
@@ -12,29 +13,28 @@ export class AnalysisTask {
   constructor(
     private readonly harness: CodingHarness,
     private readonly workspaces: LocalGitWorkspaces,
-    private readonly actionableRepositoryId: string,
+    private readonly limits: BugFixLimits,
   ) {}
 
   async investigateTicket(
     ticket: NormalizedBugTicket,
-    repository: RepositoryConfig,
+    repository: RepositoryTarget,
     workspace: RepositoryWorkspace,
   ): Promise<{ analysis: TicketAnalysis; gate: ReturnType<typeof applyConfidenceGate> }> {
     const analysis = await this.harness.analyzeTask({
       ticket,
       workspacePath: workspace.path,
-      repositoryId: repository.id,
-      repositoryInstructions: repositoryInstructions(repository),
+      repositoryId: repository.url,
       limits: {
-        maxAgentTurns: repository.limits.maxAgentTurns,
-        maxExecutionMinutes: repository.limits.maxExecutionMinutes,
+        maxAgentTurns: this.limits.maxAgentTurns,
+        maxExecutionMinutes: this.limits.maxExecutionMinutes,
       },
     });
 
     if (analysis.issueKey !== ticket.key)
       throw new restate.TerminalError(`Analysis returned ${analysis.issueKey} for ${ticket.key}`);
 
-    const gate = applyConfidenceGate(analysis, repository.id, this.actionableRepositoryId);
+    const gate = applyConfidenceGate(analysis);
     await this.workspaces.writeInvestigationReport(
       workspace,
       ticket.key,
@@ -45,11 +45,10 @@ export class AnalysisTask {
   }
 }
 
-export function applyConfidenceGate(
-  analysis: TicketAnalysis,
-  repositoryId: string,
-  allowedRepositoryId: string,
-): { actionable: boolean; reason: string } {
+export function applyConfidenceGate(analysis: TicketAnalysis): {
+  actionable: boolean;
+  reason: string;
+} {
   const blockers: string[] = [];
   if (analysis.rootCauseConfidence !== "high") blockers.push("root-cause confidence is not High");
   if (analysis.proposedFixConfidence !== "high")
@@ -61,15 +60,10 @@ export function applyConfidenceGate(
   if (analysis.missingInformation.length > 0)
     blockers.push(`missing information: ${analysis.missingInformation.join("; ")}`);
 
-  if (repositoryId !== allowedRepositoryId)
-    blockers.push(
-      `repository ${repositoryId} is outside the allowed ${allowedRepositoryId} repository`,
-    );
-
   return blockers.length === 0
     ? {
         actionable: true,
-        reason: "High-confidence, focused, verifiable fix contained in the allowed repository",
+        reason: "High-confidence, focused, verifiable fix",
       }
     : { actionable: false, reason: blockers.join(". ") };
 }
@@ -122,12 +116,4 @@ ${list(analysis.reproductionEvidence)}
 ## Missing information
 ${list(analysis.missingInformation)}
 ${decision.actionable ? "" : `\n## Human action required\n${analysis.humanRequest ?? decision.reason}\n`}`;
-}
-
-function repositoryInstructions(repository: RepositoryConfig) {
-  return {
-    buildCommands: repository.buildCommands,
-    testCommands: repository.testCommands,
-    lintCommands: repository.lintCommands,
-  };
 }

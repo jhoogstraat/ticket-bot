@@ -17,11 +17,6 @@ export interface StartHarnessTaskInput {
   ticket: NormalizedBugTicket;
   approvedAnalysis: TicketAnalysis;
   workspacePath: string;
-  repositoryInstructions: {
-    buildCommands: string[];
-    testCommands: string[];
-    lintCommands: string[];
-  };
   limits: { maxAgentTurns: number; maxChangedFiles: number; maxExecutionMinutes: number };
 }
 
@@ -29,11 +24,6 @@ export interface AnalyzeHarnessTaskInput {
   ticket: NormalizedBugTicket;
   workspacePath: string;
   repositoryId: string;
-  repositoryInstructions: {
-    buildCommands: string[];
-    testCommands: string[];
-    lintCommands: string[];
-  };
   limits: { maxAgentTurns: number; maxExecutionMinutes: number };
 }
 

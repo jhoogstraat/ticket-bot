@@ -1,12 +1,32 @@
 import * as restate from "@restatedev/restate-sdk";
-import { jira, gitlab, codingHarness, workspaces, actionableRepositoryId } from "./dependencies.js";
+import { z } from "zod";
+import {
+  jira,
+  forges,
+  codingHarness,
+  workspaces,
+  limits,
+  trustedRepositoryUrlPrefixes,
+} from "./dependencies.js";
+import {
+  assertTrustedRepository,
+  repositoryTargetSchema,
+  type RepositoryTarget,
+} from "../../domain/repository.js";
 import { normalizeJiraIssue } from "../../integrations/jira/jira-normalizer.js";
 import { AnalysisTask } from "./tasks/analysis.js";
 import { CodingTask } from "./tasks/coding.js";
 import { PublicationTask } from "./tasks/publication.js";
-import { repositoryConfigs, resolveRepository } from "../../app/repository-configs.js";
 
-export const workflowId = (issueKey: string): string => `bugfix/${issueKey}`;
+const workflowInputSchema = repositoryTargetSchema.extend({
+  issueKey: z.string().regex(/^[A-Z][A-Z0-9]+-\d+$/),
+  generation: z.number().int().positive(),
+});
+
+export type BugFixWorkflowInput = z.infer<typeof workflowInputSchema>;
+
+export const workflowId = (issueKey: string, generation: number): string =>
+  `bugfix/${issueKey}/${generation}`;
 
 export interface BugFixWorkflowResult {
   runId: string;
@@ -20,30 +40,25 @@ export const BugFixWorkflow = restate.workflow({
     inactivityTimeout: 60_000,
   },
   handlers: {
-    run: async (ctx: restate.WorkflowContext, issueKey: string) => {
-      const analysisTask = new AnalysisTask(codingHarness, workspaces, actionableRepositoryId);
-      const codingTask = new CodingTask(codingHarness, workspaces);
-      const publicationTask = new PublicationTask(gitlab, jira);
+    run: async (ctx: restate.WorkflowContext, raw: unknown) => {
+      const input = validateWorkflowInput(raw, trustedRepositoryUrlPrefixes);
+      const repository: RepositoryTarget = { forge: input.forge, url: input.url };
+      const analysisTask = new AnalysisTask(codingHarness, workspaces, limits);
+      const codingTask = new CodingTask(codingHarness, workspaces, limits);
+      const publicationTask = new PublicationTask(forges, jira);
 
-      const runId = workflowId(issueKey);
+      const runId = workflowId(input.issueKey, input.generation);
 
-      const ticketDto = await ctx.run("fetch-ticket", async () => await jira.getIssue(issueKey));
+      const ticketDto = await ctx.run(
+        "fetch-ticket",
+        async () => await jira.getIssue(input.issueKey),
+      );
 
       const ticket = await ctx.run("normalize-ticket", () => normalizeJiraIssue(ticketDto));
 
-      const repository = await ctx.run("resolve-repo", () =>
-        resolveRepository(ticket, repositoryConfigs),
-      );
-
       const investigationWorkspace = await ctx.run(
         "create-workspace",
-        () =>
-          workspaces.create({
-            workflowId: runId,
-            issueKey: ticket.key,
-            shortSlug: ticket.summary,
-            repository,
-          }),
+        () => workspaces.create(runId, ticket.key, ticket.summary, repository),
         { maxRetryAttempts: 3 },
       );
 
@@ -73,13 +88,13 @@ export const BugFixWorkflow = restate.workflow({
 
       const harnessResult = await ctx.run(
         "start-codex",
-        () => codingTask.implementTicket(ticket, repository, workspace, investigation.analysis),
+        () => codingTask.implementTicket(ticket, workspace, investigation.analysis),
         { maxRetryAttempts: 2 },
       );
 
       await ctx.run(
         "validate-and-commit",
-        () => codingTask.commitImplementation(workspace, ticket, repository, harnessResult),
+        () => codingTask.commitImplementation(workspace, ticket, harnessResult),
         { maxRetryAttempts: 1 },
       );
 
@@ -109,7 +124,6 @@ export const BugFixWorkflow = restate.workflow({
               harnessResult.sessionId,
               reviewAttempt,
               ticket,
-              repository,
               review,
             ),
           { maxRetryAttempts: 1 },
@@ -130,6 +144,7 @@ export const BugFixWorkflow = restate.workflow({
             ticket,
             repository,
             workspace.branchName,
+            workspace.defaultBranch,
             harnessResult,
           ),
         { maxRetryAttempts: 3 },
@@ -153,3 +168,18 @@ export const BugFixWorkflow = restate.workflow({
     },
   },
 });
+
+export function validateWorkflowInput(
+  raw: unknown,
+  trustedUrlPrefixes: readonly string[],
+): BugFixWorkflowInput {
+  try {
+    const input = workflowInputSchema.parse(raw);
+    assertTrustedRepository(input, trustedUrlPrefixes);
+    return input;
+  } catch (error) {
+    throw new restate.TerminalError(error instanceof Error ? error.message : String(error), {
+      errorCode: 400,
+    });
+  }
+}

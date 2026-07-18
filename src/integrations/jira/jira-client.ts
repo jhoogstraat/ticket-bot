@@ -19,6 +19,7 @@ export class HttpJiraClient implements JiraClient {
     private readonly baseUrl: string,
     private readonly token: string,
   ) {}
+
   async getIssue(issueKey: string): Promise<JiraIssueDto> {
     const response = await fetch(
       `${this.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}?expand=changelog`,
@@ -31,6 +32,7 @@ export class HttpJiraClient implements JiraClient {
     if (!response.ok) throw new Error(`Jira returned ${response.status}`);
     return (await response.json()) as JiraIssueDto;
   }
+
   async searchOpenBugs(filterUrl: string, nextPageToken?: string): Promise<JiraSearchPage> {
     const filterId = extractFilterId(filterUrl);
     const url = new URL(`${this.baseUrl}/rest/api/3/search/jql`);
@@ -51,6 +53,7 @@ export class HttpJiraClient implements JiraClient {
       isLast: body.isLast ?? !body.nextPageToken,
     };
   }
+
   async claimIssue(issueKey: string): Promise<void> {
     const myself = await this.request(new URL(`${this.baseUrl}/rest/api/3/myself`), {
       headers: { accept: "application/json" },
@@ -68,6 +71,7 @@ export class HttpJiraClient implements JiraClient {
 
     await this.transition(issueKey, "In Progress");
   }
+
   async ensureMergeRequestLink(issueKey: string, mergeRequestUrl: string): Promise<void> {
     const url = new URL(
       `${this.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/remotelink`,
@@ -87,9 +91,11 @@ export class HttpJiraClient implements JiraClient {
       body: JSON.stringify({ globalId, object: { url: mergeRequestUrl, title: "Merge request" } }),
     });
   }
+
   ensureReadyToMerge(issueKey: string): Promise<void> {
     return this.transition(issueKey, "Ready to merge");
   }
+
   private async transition(issueKey: string, targetName: string): Promise<void> {
     const issue = await this.getIssue(issueKey);
     if (issue.fields.status.name.toLowerCase() === targetName.toLowerCase()) return;
@@ -115,6 +121,7 @@ export class HttpJiraClient implements JiraClient {
       body: JSON.stringify({ transition: { id: transition.id } }),
     });
   }
+
   private async request(url: URL, init: RequestInit): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${this.token}`);
@@ -129,11 +136,13 @@ export class FakeJiraClient implements JiraClient {
   readonly linkedMergeRequests: Array<{ issueKey: string; mergeRequestUrl: string }> = [];
   readonly readyToMerge: string[] = [];
   constructor(private readonly issues: ReadonlyMap<string, JiraIssueDto>) {}
+
   async getIssue(issueKey: string): Promise<JiraIssueDto> {
     const issue = this.issues.get(issueKey);
     if (!issue) throw new Error(`Fake Jira issue ${issueKey} does not exist`);
     return structuredClone(issue);
   }
+
   async searchOpenBugs(_filterUrl: string, nextPageToken?: string): Promise<JiraSearchPage> {
     if (nextPageToken) return { issues: [], isLast: true };
     return {
@@ -147,10 +156,12 @@ export class FakeJiraClient implements JiraClient {
       isLast: true,
     };
   }
+
   claimIssue(issueKey: string): Promise<void> {
     this.claimed.push(issueKey);
     return Promise.resolve();
   }
+
   ensureMergeRequestLink(issueKey: string, mergeRequestUrl: string): Promise<void> {
     if (
       !this.linkedMergeRequests.some(
@@ -161,6 +172,7 @@ export class FakeJiraClient implements JiraClient {
 
     return Promise.resolve();
   }
+
   ensureReadyToMerge(issueKey: string): Promise<void> {
     if (!this.readyToMerge.includes(issueKey)) this.readyToMerge.push(issueKey);
     return Promise.resolve();

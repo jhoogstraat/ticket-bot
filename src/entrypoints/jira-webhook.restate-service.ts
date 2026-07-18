@@ -1,9 +1,10 @@
 import * as restate from "@restatedev/restate-sdk";
 import { z } from "zod";
+import { repositoryTargetSchema } from "../domain/repository.js";
 import type { BugFixWorkflow } from "../workflows/bugfix/workflow.js";
 import { workflowId } from "../workflows/bugfix/workflow.js";
 
-const jiraWebhookSchema = z.object({
+const jiraWebhookSchema = repositoryTargetSchema.extend({
   webhookEvent: z.string(),
   providerEventId: z.string().min(1),
   generation: z.number().int().positive().default(1),
@@ -43,8 +44,13 @@ export function createJiraWebhookIngressService(workflow: typeof BugFixWorkflow)
     handlers: {
       receive: async (ctx: restate.Context, raw: unknown) => {
         const event = validateJiraWebhook(raw);
-        const id = workflowId(event.issue.key);
-        ctx.workflowSendClient(workflow, id).run(event.issue.key);
+        const id = workflowId(event.issue.key, event.generation);
+        ctx.workflowSendClient(workflow, id).run({
+          issueKey: event.issue.key,
+          generation: event.generation,
+          forge: event.forge,
+          url: event.url,
+        });
 
         return { accepted: true, workflowId: id };
       },

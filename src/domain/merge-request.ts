@@ -7,6 +7,7 @@ export interface MergeRequest {
 export interface CreateMergeRequestInput {
   idempotencyKey: string;
   projectId: string;
+  repositoryUrl: string;
   sourceBranch: string;
   targetBranch: string;
   title: string;

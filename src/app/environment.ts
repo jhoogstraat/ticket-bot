@@ -23,9 +23,21 @@ const schema = z.object({
   CALLBACK_TIMEOUT_MINUTES: z.coerce.number().positive().default(90),
   JIRA_BASE_URL: z.url().optional(),
   JIRA_TOKEN: z.string().optional(),
-  GITLAB_BASE_URL: z.url().optional(),
   GITLAB_TOKEN: z.string().optional(),
-  ACTIONABLE_REPOSITORY_ID: z.string().default("invoicing-outbound"),
+  GITHUB_TOKEN: z.string().optional(),
+  TRUSTED_REPOSITORY_URL_PREFIXES: z
+    .string()
+    .default("")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((prefix) => prefix.trim())
+        .filter(Boolean),
+    ),
+  MAX_AGENT_TURNS: z.coerce.number().int().positive().default(30),
+  MAX_CHANGED_FILES: z.coerce.number().int().positive().default(15),
+  MAX_REPAIR_ATTEMPTS: z.coerce.number().int().nonnegative().default(3),
+  MAX_EXECUTION_MINUTES: z.coerce.number().positive().default(45),
 });
 
 export type Environment = z.infer<typeof schema>;

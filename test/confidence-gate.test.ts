@@ -21,22 +21,19 @@ const complete: TicketAnalysis = {
 };
 
 describe("confidence gate", () => {
-  it("accepts only a high-confidence focused fix in invoicing-outbound", () => {
-    expect(
-      applyConfidenceGate(complete, "invoicing-outbound", "invoicing-outbound").actionable,
-    ).toBe(true);
+  it("accepts a high-confidence focused fix", () => {
+    expect(applyConfidenceGate(complete).actionable).toBe(true);
   });
 
   it("blocks before Jira mutation when evidence or repository scope is incomplete", () => {
-    const decision = applyConfidenceGate(
-      { ...complete, rootCauseConfidence: "medium", missingInformation: ["production log"] },
-      "other",
-      "invoicing-outbound",
-    );
+    const decision = applyConfidenceGate({
+      ...complete,
+      rootCauseConfidence: "medium",
+      missingInformation: ["production log"],
+    });
 
     expect(decision.actionable).toBe(false);
     expect(decision.reason).toContain("root-cause confidence");
     expect(decision.reason).toContain("production log");
-    expect(decision.reason).toContain("outside the allowed invoicing-outbound repository");
   });
 });

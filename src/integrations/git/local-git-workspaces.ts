@@ -1,23 +1,24 @@
 import { execFile } from "node:child_process";
-import { mkdir, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { constants } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, realpath, rename, rm } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import { createHash } from "node:crypto";
-import type { RepositoryConfig } from "../../domain/repository.js";
+import type { RepositoryTarget } from "../../domain/repository.js";
 
 const execFileAsync = promisify(execFile);
+
+const GIT_READ_TIMEOUT_MS = 10_000;
+const GIT_WRITE_TIMEOUT_MS = 60_000;
+const GIT_NETWORK_TIMEOUT_MS = 120_000;
+
+const DEFAULT_MAX_BUFFER_BYTES = 2_000_000;
+const DIFF_MAX_BUFFER_BYTES = 10_000_000;
 
 export interface RepositoryWorkspace {
   path: string;
   branchName: string;
   baseCommitSha: string;
-}
-
-export interface CreateRepositoryWorkspaceInput {
-  workflowId: string;
-  issueKey: string;
-  shortSlug: string;
-  repository: RepositoryConfig;
+  defaultBranch: string;
 }
 
 export interface WorkspaceChanges {
@@ -29,110 +30,107 @@ export interface WorkspaceInspection extends WorkspaceChanges {
   diffSummary: string;
 }
 
+interface RootPaths {
+  logical: string;
+  real: string;
+}
+
+interface GitResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+interface GitOptions {
+  cwd?: string;
+  timeout?: number;
+  maxBuffer?: number;
+  acceptedExitCodes?: readonly number[];
+  redact?: readonly string[];
+}
+
+interface GitFailure {
+  code: number | string | undefined;
+  killed: boolean;
+  stderr: string;
+  stdout: string;
+}
+
 export class LocalGitWorkspaces {
   constructor(private readonly root: string) {}
 
-  async create(input: CreateRepositoryWorkspaceInput): Promise<RepositoryWorkspace> {
-    const root = resolve(this.root);
-    await mkdir(root, { recursive: true });
-    const suffix = createHash("sha256").update(input.workflowId).digest("hex").slice(0, 12);
-    const path = resolve(root, `${sanitize(input.issueKey)}-${suffix}`);
-    if (!path.startsWith(`${root}/`)) throw new Error("Resolved workspace escaped its root");
+  async create(
+    workflowId: string,
+    issueKey: string,
+    shortSlug: string,
+    repository: RepositoryTarget,
+  ): Promise<RepositoryWorkspace> {
+    assertNonBlank(workflowId, "workflowId");
+    assertNonBlank(issueKey, "issueKey");
+    assertCloneUrl(repository.url);
 
-    const branchName = `agent/${input.issueKey.toLowerCase()}/${slug(input.shortSlug)}`;
-    let createdWorkspace = false;
+    const root = await this.resolveRoot(true);
+    const suffix = workflowSuffix(workflowId);
+    const issueSegment = safeSegment(issueKey, "issue", 40);
+    const workspacePath = resolve(root.logical, `${issueSegment}-${suffix}`);
+    const branchName = `agent/${issueSegment.toLowerCase()}/${slug(shortSlug)}-${suffix}`;
+
+    assertChildPath(root.logical, workspacePath, "Workspace path escaped its configured root");
+    await assertValidBranchName(branchName);
+
     try {
-      if (await pathExists(path)) {
-        const { stdout: existingBranch } = await execFileAsync(
-          "git",
-          ["branch", "--show-current"],
-          { cwd: path },
-        );
-
-        const { stdout: existingBase } = await execFileAsync(
-          "git",
-          ["merge-base", "HEAD", input.repository.defaultBranch],
-          { cwd: path },
-        );
-
-        const workspace = {
-          path,
-          branchName:
-            existingBranch.trim() === input.repository.defaultBranch
-              ? branchName
-              : existingBranch.trim(),
-          baseCommitSha: existingBase.trim(),
-        };
-
-        return workspace;
+      if (await pathExists(workspacePath)) {
+        return await this.loadExistingWorkspace(workspacePath, branchName, repository);
       }
 
-      createdWorkspace = true;
-      await execFileAsync("git", ["clone", "--no-hardlinks", input.repository.cloneUrl, path], {
-        timeout: 120_000,
-      });
-
-      await execFileAsync("git", ["checkout", input.repository.defaultBranch], {
-        cwd: path,
-        timeout: 30_000,
-      });
-
-      const { stdout: base } = await execFileAsync("git", ["rev-parse", "HEAD"], {
-        cwd: path,
-        timeout: 10_000,
-      });
-
-      const workspace = {
-        path,
+      return await this.cloneWorkspaceAtomically(
+        root,
+        workspacePath,
         branchName,
-        baseCommitSha: base.trim(),
-      };
-
-      return workspace;
-    } catch (error) {
-      if (createdWorkspace) await rm(path, { recursive: true, force: true });
-      throw new Error(
-        `Could not create workspace: ${error instanceof Error ? error.message : String(error)}`,
+        repository,
+        suffix,
       );
+    } catch (error) {
+      throw new Error(`Could not create workspace: ${errorMessage(error)}`, {
+        cause: error,
+      });
     }
   }
 
   async activateBranch(workspace: RepositoryWorkspace): Promise<RepositoryWorkspace> {
-    this.assertContained(workspace);
-    const { stdout: current } = await execFileAsync("git", ["branch", "--show-current"], {
-      cwd: workspace.path,
-    });
+    const cwd = await this.assertUsableWorkspace(workspace);
+    const currentBranch = await currentBranchName(cwd);
 
-    if (current.trim() !== workspace.branchName) {
-      try {
-        await execFileAsync("git", ["checkout", "-b", workspace.branchName], {
-          cwd: workspace.path,
-          timeout: 30_000,
-        });
-      } catch {
-        await execFileAsync("git", ["checkout", workspace.branchName], {
-          cwd: workspace.path,
-          timeout: 30_000,
-        });
-      }
-    }
+    if (currentBranch === workspace.branchName) return workspace;
+
+    const branchRef = `refs/heads/${workspace.branchName}`;
+    const branchExists =
+      (
+        await runGit(["show-ref", "--verify", "--quiet", branchRef], {
+          cwd,
+          acceptedExitCodes: [0, 1],
+        })
+      ).exitCode === 0;
+
+    await runGit(
+      branchExists
+        ? ["switch", "--", workspace.branchName]
+        : ["switch", "-c", workspace.branchName, "--"],
+      { cwd, timeout: GIT_WRITE_TIMEOUT_MS },
+    );
 
     return workspace;
   }
 
   async inspectPendingChanges(workspace: RepositoryWorkspace): Promise<WorkspaceChanges> {
-    this.assertContained(workspace);
-    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1", "-uall"], {
-      cwd: workspace.path,
-      maxBuffer: 2_000_000,
+    const cwd = await this.assertUsableWorkspace(workspace);
+    const { stdout } = await runGit(["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
+      cwd,
+      maxBuffer: DEFAULT_MAX_BUFFER_BYTES,
+      timeout: GIT_READ_TIMEOUT_MS,
     });
 
-    const changedFiles = status
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((line) => line.slice(3).split(" -> ").at(-1) ?? "");
-
-    return { changedFiles };
+    return { changedFiles: parsePorcelainV1Z(stdout) };
   }
 
   async writeInvestigationReport(
@@ -140,102 +138,528 @@ export class LocalGitWorkspaces {
     issueKey: string,
     content: string,
   ): Promise<void> {
-    this.assertContained(workspace);
-    const target = resolve(workspace.path, "ticket-analysis", sanitize(issueKey), "ANALYSIS.md");
-    if (!target.startsWith(`${resolve(workspace.path)}/`))
-      throw new Error("Artifact path escaped its workspace");
+    assertNonBlank(issueKey, "issueKey");
+    const workspaceRoot = await this.assertUsableWorkspace(workspace);
+    const reportDirectory = await ensureSafeSubdirectory(workspaceRoot, [
+      "ticket-analysis",
+      safeSegment(issueKey, "issue", 80),
+    ]);
 
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, content, "utf8");
+    await writeFileAtomically(reportDirectory, "ANALYSIS.md", content);
   }
 
+  /** Inspects committed changes between the recorded base commit and HEAD. */
   async inspectChangesSinceBase(workspace: RepositoryWorkspace): Promise<WorkspaceInspection> {
-    this.assertContained(workspace);
-    const { stdout: names } = await execFileAsync(
-      "git",
-      ["diff", "--name-only", `${workspace.baseCommitSha}..HEAD`],
-      { cwd: workspace.path, maxBuffer: 2_000_000 },
-    );
+    const cwd = await this.assertUsableWorkspace(workspace);
+    await assertCommitExists(cwd, workspace.baseCommitSha);
 
-    const { stdout: diff } = await execFileAsync(
-      "git",
-      ["diff", "--no-ext-diff", "--binary", `${workspace.baseCommitSha}..HEAD`],
-      { cwd: workspace.path, maxBuffer: 10_000_000 },
-    );
+    const revisions = [workspace.baseCommitSha, "HEAD", "--"] as const;
+    const [names, diff, summary] = await Promise.all([
+      runGit(["diff", "--name-only", "-z", ...revisions], {
+        cwd,
+        maxBuffer: DEFAULT_MAX_BUFFER_BYTES,
+        timeout: GIT_READ_TIMEOUT_MS,
+      }),
+      runGit(["diff", "--no-ext-diff", "--no-textconv", ...revisions], {
+        cwd,
+        maxBuffer: DIFF_MAX_BUFFER_BYTES,
+        timeout: GIT_READ_TIMEOUT_MS,
+      }),
+      runGit(["diff", "--stat", "--no-ext-diff", ...revisions], {
+        cwd,
+        maxBuffer: 1_000_000,
+        timeout: GIT_READ_TIMEOUT_MS,
+      }),
+    ]);
 
-    const { stdout: summary } = await execFileAsync(
-      "git",
-      ["diff", "--stat", `${workspace.baseCommitSha}..HEAD`],
-      { cwd: workspace.path, maxBuffer: 1_000_000 },
-    );
-
-    return { changedFiles: names.split(/\r?\n/).filter(Boolean), diff, diffSummary: summary };
+    return {
+      changedFiles: names.stdout.split("\0").filter(Boolean),
+      diff: diff.stdout,
+      diffSummary: summary.stdout,
+    };
   }
 
   async commitChanges(workspace: RepositoryWorkspace, message: string): Promise<string> {
-    this.assertContained(workspace);
-    await execFileAsync("git", ["add", "--all"], { cwd: workspace.path });
-    await execFileAsync(
-      "git",
+    assertNonBlank(message, "commit message");
+    assertNoNul(message, "commit message");
+
+    const cwd = await this.assertUsableWorkspace(workspace);
+    await assertActiveBranch(cwd, workspace.branchName);
+
+    await runGit(["add", "--all", "--"], {
+      cwd,
+      timeout: GIT_WRITE_TIMEOUT_MS,
+    });
+
+    const stagedDiff = await runGit(["diff", "--cached", "--quiet", "--"], {
+      cwd,
+      timeout: GIT_READ_TIMEOUT_MS,
+      acceptedExitCodes: [0, 1],
+    });
+
+    if (stagedDiff.exitCode === 0) throw new Error("There are no changes to commit");
+
+    await runGit(
       [
         "-c",
         "user.name=Bug Agent",
         "-c",
         "user.email=bug-agent@localhost",
-        "-c",
-        "commit.gpgsign=false",
         "commit",
+        "--no-gpg-sign",
         "-m",
         message,
       ],
-      { cwd: workspace.path, timeout: 60_000 },
+      { cwd, timeout: GIT_WRITE_TIMEOUT_MS },
     );
 
-    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: workspace.path });
-    return stdout.trim();
+    return await resolveCommit(cwd, "HEAD");
   }
 
   async pushBranch(workspace: RepositoryWorkspace): Promise<void> {
-    this.assertContained(workspace);
+    const cwd = await this.assertUsableWorkspace(workspace);
+    await assertActiveBranch(cwd, workspace.branchName);
+
+    const branchRef = `refs/heads/${workspace.branchName}`;
+    await runGit(["push", "--set-upstream", "origin", `${branchRef}:${branchRef}`], {
+      cwd,
+      timeout: GIT_NETWORK_TIMEOUT_MS,
+    });
+  }
+
+  private async cloneWorkspaceAtomically(
+    root: RootPaths,
+    workspacePath: string,
+    branchName: string,
+    repository: RepositoryTarget,
+    suffix: string,
+  ): Promise<RepositoryWorkspace> {
+    const temporaryPath = await mkdtemp(resolve(root.logical, `.creating-${suffix}-`));
+    assertChildPath(root.logical, temporaryPath, "Temporary workspace escaped its root");
+
+    let operationFailed = false;
+    let operationError: unknown;
+
     try {
-      await execFileAsync("git", ["push", "--set-upstream", "origin", workspace.branchName], {
-        cwd: workspace.path,
-        timeout: 120_000,
+      await runGit(["clone", "--no-hardlinks", "--", repository.url, temporaryPath], {
+        timeout: GIT_NETWORK_TIMEOUT_MS,
+        redact: [repository.url],
       });
+
+      const temporaryRoot = await this.assertUsableWorkspacePath(temporaryPath);
+      const defaultBranch = await resolveDefaultBranch(temporaryRoot);
+      const baseCommitSha = await resolveCommit(temporaryRoot, "HEAD");
+
+      try {
+        await rename(temporaryPath, workspacePath);
+      } catch (error) {
+        // Another process may have published the same deterministic workspace first.
+        if (!(await pathExists(workspacePath))) throw error;
+        return await this.loadExistingWorkspace(workspacePath, branchName, repository);
+      }
+
+      return { path: workspacePath, branchName, baseCommitSha, defaultBranch };
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : String(error));
+      operationFailed = true;
+      operationError = error;
+      throw error;
+    } finally {
+      await removeTemporaryWorkspace(temporaryPath, operationFailed, operationError);
     }
   }
 
-  private assertContained(workspace: RepositoryWorkspace): void {
-    if (!this.isWithinRoot(workspace.path))
-      throw new Error("Workspace escaped its configured root");
+  private async loadExistingWorkspace(
+    workspacePath: string,
+    branchName: string,
+    repository: RepositoryTarget,
+  ): Promise<RepositoryWorkspace> {
+    const cwd = await this.assertUsableWorkspacePath(workspacePath);
+
+    const [fetchOrigin, pushOrigin, currentBranch] = await Promise.all([
+      runGit(["remote", "get-url", "origin"], { cwd }),
+      runGit(["remote", "get-url", "--push", "origin"], { cwd }),
+      currentBranchName(cwd),
+    ]);
+
+    if (
+      fetchOrigin.stdout.trim() !== repository.url ||
+      pushOrigin.stdout.trim() !== repository.url
+    ) {
+      throw new Error("Existing workspace origin does not match the submitted repository");
+    }
+
+    const defaultBranch = await resolveDefaultBranch(cwd);
+    if (currentBranch !== defaultBranch && currentBranch !== branchName) {
+      throw new Error(`Existing workspace is on unexpected branch ${currentBranch || "HEAD"}`);
+    }
+
+    const baseCommitSha = (
+      await runGit(["merge-base", "HEAD", `refs/remotes/origin/${defaultBranch}`], { cwd })
+    ).stdout.trim();
+
+    assertCommitSha(baseCommitSha);
+
+    return { path: workspacePath, branchName, baseCommitSha, defaultBranch };
   }
-  private isWithinRoot(path: string): boolean {
-    const root = resolve(this.root);
-    return resolve(path).startsWith(`${root}/`);
+
+  private async assertUsableWorkspace(workspace: RepositoryWorkspace): Promise<string> {
+    await assertValidBranchName(workspace.branchName);
+    assertCommitSha(workspace.baseCommitSha);
+    return await this.assertUsableWorkspacePath(workspace.path);
+  }
+
+  private async assertUsableWorkspacePath(workspacePath: string): Promise<string> {
+    const workspaceRoot = await this.assertWorkspaceContained(workspacePath);
+    await assertGitLayout(workspaceRoot);
+    return workspaceRoot;
+  }
+
+  private async assertWorkspaceContained(workspacePath: string): Promise<string> {
+    const root = await this.resolveRoot(false);
+    const logicalWorkspace = resolve(workspacePath);
+    assertChildPath(root.logical, logicalWorkspace, "Workspace escaped its configured root");
+
+    const realWorkspace = await realpath(logicalWorkspace);
+    assertChildPath(root.real, realWorkspace, "Workspace escaped its configured root");
+    return realWorkspace;
+  }
+
+  private async resolveRoot(create: boolean): Promise<RootPaths> {
+    const logical = resolve(this.root);
+    if (create) await mkdir(logical, { recursive: true });
+    return { logical, real: await realpath(logical) };
   }
 }
 
-function sanitize(value: string): string {
-  return basename(value).replace(/[^a-zA-Z0-9._-]/g, "-");
+async function runGit(args: readonly string[], options: GitOptions = {}): Promise<GitResult> {
+  const acceptedExitCodes = options.acceptedExitCodes ?? [0];
+
+  try {
+    const { stdout, stderr } = await execFileAsync("git", [...args], {
+      cwd: options.cwd,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GCM_INTERACTIVE: "Never",
+        GIT_PAGER: "cat",
+        GIT_TERMINAL_PROMPT: "0",
+      },
+      maxBuffer: options.maxBuffer ?? DEFAULT_MAX_BUFFER_BYTES,
+      timeout: options.timeout ?? GIT_READ_TIMEOUT_MS,
+      windowsHide: true,
+    });
+
+    return { stdout: stdout, stderr: stderr, exitCode: 0 };
+  } catch (error) {
+    const failure = gitFailure(error);
+
+    const exitCode = typeof failure.code === "number" ? failure.code : undefined;
+
+    if (exitCode !== undefined && acceptedExitCodes.includes(exitCode)) {
+      return {
+        stdout: failure.stdout,
+        stderr: failure.stderr,
+        exitCode,
+      };
+    }
+
+    const subcommand = args[0] ?? "command";
+    const stderr = redactSecrets(failure.stderr.trim().slice(0, 4_000), options.redact ?? []);
+
+    const reason = failure.killed
+      ? "timed out or was terminated"
+      : failure.code === "ENOENT"
+        ? "Git executable was not found"
+        : `failed${exitCode === undefined ? "" : ` with exit code ${exitCode}`}`;
+
+    throw new Error(`git ${subcommand} ${reason}${stderr.length > 0 ? `: ${stderr}` : ""}`);
+  }
+}
+
+async function removeTemporaryWorkspace(
+  temporaryPath: string,
+  operationFailed: boolean,
+  operationError: unknown,
+): Promise<void> {
+  try {
+    await rm(temporaryPath, { recursive: true, force: true });
+  } catch (cleanupError) {
+    if (operationFailed) {
+      throw new AggregateError(
+        [operationError, cleanupError],
+        "Workspace operation and cleanup both failed",
+      );
+    }
+
+    throw cleanupError;
+  }
+}
+
+function gitFailure(error: unknown): GitFailure {
+  if (!isRecord(error)) {
+    return { code: undefined, killed: false, stderr: "", stdout: "" };
+  }
+
+  const code = error.code;
+  return {
+    code: typeof code === "number" || typeof code === "string" ? code : undefined,
+    killed: error.killed === true,
+    stderr: processOutput(error.stderr),
+    stdout: processOutput(error.stdout),
+  };
+}
+
+function processOutput(value: unknown): string {
+  if (typeof value === "string") return value;
+  return Buffer.isBuffer(value) ? value.toString() : "";
+}
+
+async function assertValidBranchName(branchName: string): Promise<void> {
+  assertNonBlank(branchName, "branch name");
+  assertNoNul(branchName, "branch name");
+
+  try {
+    await runGit(["check-ref-format", "--branch", branchName], {
+      maxBuffer: 64_000,
+    });
+  } catch {
+    throw new Error(`Invalid Git branch name: ${JSON.stringify(branchName)}`);
+  }
+}
+
+async function assertGitLayout(workspaceRoot: string): Promise<void> {
+  const [topLevel, gitDirectory] = await Promise.all([
+    runGit(["rev-parse", "--show-toplevel"], { cwd: workspaceRoot }),
+    runGit(["rev-parse", "--absolute-git-dir"], { cwd: workspaceRoot }),
+  ]);
+
+  const realTopLevel = await realpath(topLevel.stdout.trim());
+  if (realTopLevel !== workspaceRoot) {
+    throw new Error("Git worktree root does not match the workspace root");
+  }
+
+  const realGitDirectory = await realpath(gitDirectory.stdout.trim());
+  assertChildPath(workspaceRoot, realGitDirectory, "Git metadata directory escaped its workspace");
+}
+
+async function assertActiveBranch(cwd: string, expectedBranch: string): Promise<void> {
+  const currentBranch = await currentBranchName(cwd);
+  if (currentBranch !== expectedBranch) {
+    throw new Error(
+      `Expected active branch ${expectedBranch}, found ${currentBranch || "detached HEAD"}`,
+    );
+  }
+}
+
+async function currentBranchName(cwd: string): Promise<string> {
+  return (
+    await runGit(["branch", "--show-current"], {
+      cwd,
+      maxBuffer: 64_000,
+    })
+  ).stdout.trim();
+}
+
+async function resolveDefaultBranch(cwd: string): Promise<string> {
+  const ref = (
+    await runGit(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], {
+      cwd,
+      maxBuffer: 64_000,
+    })
+  ).stdout.trim();
+
+  const prefix = "origin/";
+  if (!ref.startsWith(prefix)) throw new Error("Could not resolve the remote default branch");
+
+  const branch = ref.slice(prefix.length);
+  await assertValidBranchName(branch);
+  return branch;
+}
+
+async function resolveCommit(cwd: string, revision: string): Promise<string> {
+  const sha = (
+    await runGit(["rev-parse", "--verify", `${revision}^{commit}`], {
+      cwd,
+      maxBuffer: 64_000,
+    })
+  ).stdout.trim();
+
+  assertCommitSha(sha);
+  return sha;
+}
+
+async function assertCommitExists(cwd: string, sha: string): Promise<void> {
+  assertCommitSha(sha);
+  await runGit(["cat-file", "-e", `${sha}^{commit}`], {
+    cwd,
+    maxBuffer: 64_000,
+  });
+}
+
+function assertCommitSha(value: string): void {
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)) {
+    throw new Error("Invalid Git commit SHA");
+  }
+}
+
+function parsePorcelainV1Z(status: string): string[] {
+  const records = status.split("\0");
+  const changedFiles = new Set<string>();
+
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (!record) continue;
+    if (record.length < 4 || record[2] !== " ") {
+      throw new Error("Unexpected git status --porcelain=v1 -z output");
+    }
+
+    const state = record.slice(0, 2);
+    changedFiles.add(record.slice(3));
+
+    // With -z, rename/copy records contain the destination first and source second.
+    if (state.includes("R") || state.includes("C")) {
+      index++;
+      if (!records[index]) {
+        throw new Error("Incomplete rename/copy entry in git status output");
+      }
+    }
+  }
+
+  return [...changedFiles];
+}
+
+async function ensureSafeSubdirectory(root: string, segments: readonly string[]): Promise<string> {
+  let current = root;
+
+  for (const segment of segments) {
+    const next = resolve(current, segment);
+    assertChildPath(root, next, "Artifact directory escaped its workspace");
+
+    try {
+      await mkdir(next);
+    } catch (error) {
+      if (!hasErrorCode(error, "EEXIST")) throw error;
+    }
+
+    const metadata = await lstat(next);
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new Error("Artifact path contains a non-directory or symbolic link");
+    }
+
+    const realDirectory = await realpath(next);
+    assertChildPath(root, realDirectory, "Artifact directory escaped its workspace");
+    current = realDirectory;
+  }
+
+  return current;
+}
+
+async function writeFileAtomically(
+  directory: string,
+  filename: string,
+  content: string,
+): Promise<void> {
+  const target = resolve(directory, filename);
+  const temporary = resolve(directory, `.${filename}.${crypto.randomUUID()}.tmp`);
+  assertChildPath(directory, target, "Artifact file escaped its directory");
+  assertChildPath(directory, temporary, "Temporary artifact escaped its directory");
+
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+
+  try {
+    handle = await open(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+
+    // Renaming replaces the directory entry itself instead of following a target symlink.
+    await rename(temporary, target);
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
+function assertChildPath(root: string, candidate: string, message: string): void {
+  const relativePath = relative(resolve(root), resolve(candidate));
+  if (
+    relativePath === "" ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${sep}`) ||
+    isAbsolute(relativePath)
+  ) {
+    throw new Error(message);
+  }
+}
+
+function workflowSuffix(workflowId: string): string {
+  return new Bun.CryptoHasher("sha256").update(workflowId).digest("hex").slice(0, 12);
+}
+
+function safeSegment(value: string, fallback: string, maxLength: number): string {
+  const sanitized = value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, maxLength)
+    .replace(/-+$/g, "");
+
+  return sanitized || fallback;
 }
 
 function slug(value: string): string {
-  return (
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 48) || "bugfix"
-  );
+  return safeSegment(value.toLowerCase(), "bugfix", 48);
 }
 
 async function pathExists(path: string): Promise<boolean> {
   try {
-    await stat(path);
+    await lstat(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (hasErrorCode(error, "ENOENT")) return false;
+    throw error;
   }
+}
+
+function assertCloneUrl(value: string): void {
+  assertNonBlank(value, "repository clone URL");
+  if (value !== value.trim() || /[\0\r\n]/.test(value)) {
+    throw new Error("Repository clone URL contains invalid whitespace or control characters");
+  }
+}
+
+function assertNonBlank(value: string, name: string): void {
+  if (value.trim().length === 0) throw new Error(`${name} must not be blank`);
+}
+
+function assertNoNul(value: string, name: string): void {
+  if (value.includes("\0")) throw new Error(`${name} must not contain a NUL byte`);
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
+}
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function redactSecrets(value: string, secrets: readonly string[]): string {
+  let redacted = value.replace(/([a-z][a-z0-9+.-]*:\/\/)([^/@\s]+)@/gi, "$1[REDACTED]@");
+  for (const secret of secrets) {
+    if (secret) redacted = redacted.replaceAll(secret, "[REDACTED]");
+  }
+
+  return redacted;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

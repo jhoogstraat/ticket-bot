@@ -202,7 +202,7 @@ This is the most important file for understanding the end-to-end behavior.
 - proposed-fix confidence is High;
 - affected files and observable verification are identified;
 - no required information is missing;
-- the resolved repository matches `ACTIONABLE_REPOSITORY_ID`.
+- the submitted repository URL matches `TRUSTED_REPOSITORY_URL_PREFIXES` before investigation.
 
 ### Repair policy
 
@@ -217,7 +217,7 @@ The bugfix data contracts live with their real owners:
 - [`src/domain/ticket.ts`](../src/domain/ticket.ts): normalized Jira evidence;
 - [`src/coding/coding-harness.ts`](../src/coding/coding-harness.ts): agent task and result contracts;
 - [`src/domain/ci.ts`](../src/domain/ci.ts): compact CI and Sonar evidence;
-- [`src/domain/repository.ts`](../src/domain/repository.ts): repository configuration;
+- [`src/domain/repository.ts`](../src/domain/repository.ts): forge-neutral repository target and URL authorization;
 - [`src/domain/merge-request.ts`](../src/domain/merge-request.ts): merge-request contract.
 
 ## Infrastructure and replaceable adapters

@@ -14,7 +14,6 @@ Ticket evidence (normalized, bounded JSON):
 ${buildTicketContext(input.ticket)}
 
 Repository: ${input.repositoryId}
-Configured commands: ${JSON.stringify(input.repositoryInstructions)}
 Limits: ${JSON.stringify(input.limits)}
 
 Trace the behavior through the repository and reproduce it when possible. Distinguish observed facts from inference. Identify the causal root, the smallest focused fix, affected files, verification, risks, and every missing fact. Confidence is High only when direct evidence supports both cause and correction. Return only the requested structured analysis.`;
@@ -28,9 +27,6 @@ ${buildTicketContext(input.ticket)}
 
 Approved high-confidence analysis:
 ${JSON.stringify(input.approvedAnalysis)}
-
-Configured commands:
-${JSON.stringify(input.repositoryInstructions)}
 
 Limits:
 ${JSON.stringify(input.limits)}

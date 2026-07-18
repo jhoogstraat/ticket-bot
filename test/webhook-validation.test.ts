@@ -6,6 +6,8 @@ describe("webhook validation", () => {
       validateJiraWebhook({
         webhookEvent: "jira:issue_updated",
         providerEventId: "jira-delivery-1",
+        forge: "gitlab",
+        url: "https://gitlab.example/group/project.git",
         issue: { key: "ABC-1", fields: { issuetype: { name: "Bug" }, status: { name: "Open" } } },
       }).issue.key,
     ).toBe("ABC-1"));
@@ -15,6 +17,8 @@ describe("webhook validation", () => {
       validateJiraWebhook({
         webhookEvent: "x",
         providerEventId: "jira-delivery-2",
+        forge: "gitlab",
+        url: "https://gitlab.example/group/project.git",
         issue: { key: "ABC-1", fields: { issuetype: { name: "Task" }, status: { name: "Open" } } },
       }),
     ).toThrow());

@@ -2,9 +2,9 @@
 
 ## Phase 1: Project scaffold and domain models
 
-- Scope: strict TypeScript, environment validation, ticket/workflow/harness/CI/MR types, repository registry, errors.
+- Scope: strict TypeScript, environment validation, ticket/workflow/harness/CI/MR types, trusted repository-target contract, errors.
 - Deliverables: build/lint/test configuration and documented boundaries.
-- Tests: repository resolution.
+- Tests: repository URL authorization.
 - Exit: clean build with no untyped external inputs.
 - Risks: evolving SDK contracts. Pin and test dependency upgrades.
 
@@ -30,13 +30,13 @@ Status: initial slice complete.
 
 Status: initial slice complete; container resource isolation remains.
 
-## Phase 4: Jira and GitLab integration
+## Phase 4: Jira and forge integration
 
 - Scope: production auth, paginated fixed filter queue, attachment download/classification, deterministic confidence-gate record, Jira claim/transitions/MR link.
 - Deliverables: API clients with short-lived credentials and idempotent mutations.
 - Tests: pagination snapshots, transition idempotency, rate limiting, redaction.
 - Exit: every ticket in the captured queue has one independent workflow; blocked tickets do not block others.
-- Risks: custom Jira fields/status names and repository mapping ownership.
+- Risks: custom Jira fields/status names and forge authentication.
 
 Status: fixed paginated queue capture, current-user claim, In Progress transition, MR link, Ready-to-merge transition, current-user MR assignment, and `LHIND` label contracts are implemented. Interactive Entra renewal and attachment-body download remain deployment adapter work.
 

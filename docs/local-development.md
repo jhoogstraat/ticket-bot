@@ -16,7 +16,7 @@ bun run format
 bun run check
 ```
 
-Environment variables are documented in `.env.example`. Fake integrations and harness are the defaults. `ADAPTER_MODE=real` requires `JIRA_BASE_URL`, `JIRA_TOKEN`, `GITLAB_BASE_URL`, `GITLAB_TOKEN`, and `WEBHOOK_SIGNING_SECRET`. `HARNESS_MODE=codex` independently selects the real Codex SDK adapter. Integration secrets are removed from the Codex runtime environment.
+Environment variables are documented in `.env.example`. Fake integrations and harness are the defaults. Every submitted repository URL must start with one of the comma-separated `TRUSTED_REPOSITORY_URL_PREFIXES`. `ADAPTER_MODE=real` requires `JIRA_BASE_URL`, `JIRA_TOKEN`, `WEBHOOK_SIGNING_SECRET`, and the token for each forge the deployment uses (`GITHUB_TOKEN` or `GITLAB_TOKEN`). `HARNESS_MODE=codex` independently selects the real Codex SDK adapter. Integration secrets are removed from the Codex runtime environment.
 
 ## Start Restate and the application
 
@@ -39,12 +39,12 @@ curl -X POST http://localhost:9070/deployments \
 
 ## Trigger the fake flow
 
-Submit the bundled fake Jira ticket to the webhook API. Fake mode accepts unsigned requests; real mode requires `x-bug-bot-signature: sha256=<HMAC-SHA256(raw-body)>`.
+Submit the bundled fake Jira ticket to the webhook API. Set `TRUSTED_REPOSITORY_URL_PREFIXES` to a prefix containing the test repository first. Fake mode accepts unsigned requests; real mode requires `x-bug-bot-signature: sha256=<HMAC-SHA256(raw-body)>`.
 
 ```bash
 curl -X POST http://localhost:3000/webhooks/jira \
   -H 'content-type: application/json' \
-  -d '{"providerEventId":"jira-demo-1","webhookEvent":"jira:issue_updated","generation":1,"issue":{"key":"DEMO-1","fields":{"issuetype":{"name":"Bug"},"status":{"name":"Ready for development"}}}}'
+  -d '{"providerEventId":"jira-demo-1","webhookEvent":"jira:issue_updated","generation":1,"forge":"gitlab","url":"https://gitlab.example.com/example/demo.git","issue":{"key":"DEMO-1","fields":{"issuetype":{"name":"Bug"},"status":{"name":"Ready for development"}}}}'
 ```
 
 The returned workflow ID is `bugfix/DEMO-1/1`. After the fake harness creates, commits, and pushes its branch, copy the current commit SHA from the workflow status into `CURRENT_COMMIT_SHA`, then deliver CI, Sonar, and review success:

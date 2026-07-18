@@ -66,7 +66,6 @@ describe("CodexHarness", () => {
       ticket,
       approvedAnalysis: analysis,
       workspacePath: "/workspace/abc-1",
-      repositoryInstructions: { buildCommands: [], testCommands: ["bun test"], lintCommands: [] },
       limits: { maxAgentTurns: 5, maxChangedFiles: 3, maxExecutionMinutes: 10 },
     });
 
