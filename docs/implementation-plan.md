@@ -22,7 +22,7 @@ Status: initial slice complete.
 
 ## Phase 3: Local runner and Codex integration
 
-- Scope: isolated clone/branch, path/timeout/output controls, schema-driven Codex CLI start/resume/review.
+- Scope: isolated clone/branch, path/timeout/output controls, schema-driven Codex SDK start/resume/review.
 - Deliverables: local runner, fake harness, real Codex adapter, Docker runner contract.
 - Tests: harness schema validation and real Git integration.
 - Exit: fake flow passes and real mode can start with valid credentials.

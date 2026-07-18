@@ -1,10 +1,15 @@
-import type { HarnessRunResult } from "../domain/harness.js";
-import type { RepositoryConfig } from "../domain/repository.js";
-import type { NormalizedBugTicket } from "../domain/ticket.js";
-import { emptyTokenUsage, humanRequired, type BugFixWorkflowState } from "../domain/workflow.js";
-import type { BugFixService } from "../services/bug-fix-service.js";
-import type { Workspace } from "../runner/execution-runner.js";
-import { saveWorkflowState, type BugFixWorkflowContext } from "./workflow-context.js";
+import type { HarnessRunResult } from "../../../../domain/harness.js";
+import type { RepositoryConfig } from "../../../../domain/repository.js";
+import type { NormalizedBugTicket } from "../../../../domain/ticket.js";
+import {
+  emptyTokenUsage,
+  humanRequired,
+  type BugFixWorkflowState,
+} from "../../../../domain/workflow.js";
+import type { Workspace } from "../../../../runner/execution-runner.js";
+import type { BugFixApplication } from "../../../../application/bugfix-application.js";
+import { saveWorkflowState, type BugFixWorkflowContext } from "../state.js";
+import { runApplicationStep } from "../../../application-step.js";
 
 export type InitialFixResult =
   | { status: "human_required"; state: BugFixWorkflowState; detail: string }
@@ -17,18 +22,20 @@ export type InitialFixResult =
 
 export async function runInitialFix(
   ctx: BugFixWorkflowContext,
-  service: BugFixService,
+  service: BugFixApplication,
   runId: string,
   generation: number,
   ticket: NormalizedBugTicket,
   repository: RepositoryConfig,
 ): Promise<InitialFixResult> {
-  const investigationWorkspace = await ctx.run(
+  const investigationWorkspace = await runApplicationStep(
+    ctx,
     "create-workspace",
     () => service.createWorkspace(runId, ticket, repository),
     { maxRetryAttempts: 3 },
   );
-  const investigation = await ctx.run(
+  const investigation = await runApplicationStep(
+    ctx,
     "investigate-ticket",
     () => service.investigate(ticket, repository, investigationWorkspace),
     { maxRetryAttempts: 2 },
@@ -61,20 +68,23 @@ export async function runInitialFix(
     return { status: "human_required", state, detail: investigation.gate.reason };
   }
 
-  await ctx.run("claim-jira-ticket", () => service.claimTicket(ticket.key), {
+  await runApplicationStep(ctx, "claim-jira-ticket", () => service.claimTicket(ticket.key), {
     maxRetryAttempts: 3,
   });
-  const implementationWorkspace = await ctx.run(
+  const implementationWorkspace = await runApplicationStep(
+    ctx,
     "activate-focused-branch",
     () => service.activateWorkspace(investigationWorkspace),
     { maxRetryAttempts: 2 },
   );
-  const harnessResult = await ctx.run(
+  const harnessResult = await runApplicationStep(
+    ctx,
     "start-codex",
     () => service.startHarness(ticket, repository, implementationWorkspace, investigation.analysis),
     { maxRetryAttempts: 2 },
   );
-  const commit = await ctx.run(
+  const commit = await runApplicationStep(
+    ctx,
     "validate-and-commit",
     () => service.validateAndCommit(implementationWorkspace, ticket, repository, harnessResult),
     { maxRetryAttempts: 1 },
@@ -95,7 +105,7 @@ export async function runInitialFix(
 
 export async function publishInitialFix(
   ctx: BugFixWorkflowContext,
-  service: BugFixService,
+  service: BugFixApplication,
   runId: string,
   ticket: NormalizedBugTicket,
   repository: RepositoryConfig,
@@ -103,8 +113,11 @@ export async function publishInitialFix(
   workspace: Workspace,
   harnessResult: HarnessRunResult,
 ): Promise<BugFixWorkflowState> {
-  await ctx.run("push-branch", () => service.push(workspace), { maxRetryAttempts: 3 });
-  const mergeRequest = await ctx.run(
+  await runApplicationStep(ctx, "push-branch", () => service.push(workspace), {
+    maxRetryAttempts: 3,
+  });
+  const mergeRequest = await runApplicationStep(
+    ctx,
     "create-draft-merge-request",
     () => service.createMergeRequest(runId, ticket, repository, workspace, harnessResult),
     { maxRetryAttempts: 3 },

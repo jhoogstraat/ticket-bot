@@ -1,6 +1,6 @@
 services:
   restate:
-    image: docker.restate.dev/restatedev/restate:latest
+    image: docker.restate.dev/restatedev/restate:1.16.2
     ports:
       - "8080:8080"
       - "9070:9070"
@@ -13,8 +13,11 @@ services:
     profiles: ["app"]
     environment:
       PORT: 9080
+      APP_PORT: 3000
+      RESTATE_INGRESS_URL: http://restate:8080
       ADAPTER_MODE: fake
       HARNESS_MODE: fake
       WORKSPACE_ROOT: /tmp/ticket-bot-workspaces
     ports:
       - "9080:9080"
+      - "3000:3000"

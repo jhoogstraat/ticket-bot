@@ -18,7 +18,7 @@ import { normalizeJiraIssue } from "../integrations/jira/jira-normalizer.js";
 import type { ExecutionRunner, Workspace } from "../runner/execution-runner.js";
 import { WorkspaceManager, type WorkspaceInspection } from "../runner/workspace-manager.js";
 
-export class BugFixService {
+export class BugFixApplication {
   constructor(
     private readonly jira: JiraClient,
     private readonly gitlab: GitLabClient,
@@ -198,18 +198,6 @@ export class BugFixService {
     return published(state, mergeRequest);
   }
 
-  async repair(
-    state: BugFixWorkflowState,
-    ticket: NormalizedBugTicket,
-    repository: RepositoryConfig,
-    failure: import("../domain/ci.js").CompactCiFailure,
-  ): Promise<{ result: HarnessRunResult; commitSha: string; state: BugFixWorkflowState }> {
-    const result = await this.continueHarness(state, ticket, failure);
-    const { commitSha } = await this.validateAndCommitRepair(state, ticket, repository, result);
-    await this.push(workspaceFromState(state));
-    return { result, commitSha, state: this.createRepairState(state, result, commitSha, failure) };
-  }
-
   async continueHarness(
     state: BugFixWorkflowState,
     ticket: NormalizedBugTicket,
@@ -351,10 +339,16 @@ export class BugFixService {
     };
   }
 
-  async handoff(state: BugFixWorkflowState): Promise<BugFixWorkflowState> {
+  async linkMergeRequestInJira(state: BugFixWorkflowState): Promise<void> {
     if (state.state !== "REVIEW_READY" || !state.mergeRequest)
       throw new DomainError("VALIDATION_FAILURE", "Only an accepted review can be handed off");
-    await this.jira.markReadyToMerge(state.issueKey, state.mergeRequest.url);
+    await this.jira.ensureMergeRequestLink(state.issueKey, state.mergeRequest.url);
+  }
+
+  async markJiraReadyToMerge(state: BugFixWorkflowState): Promise<BugFixWorkflowState> {
+    if (state.state !== "REVIEW_READY" || !state.mergeRequest)
+      throw new DomainError("VALIDATION_FAILURE", "Only an accepted review can be handed off");
+    await this.jira.ensureReadyToMerge(state.issueKey);
     return done(state, "Ready to merge; merge remains a human action");
   }
 

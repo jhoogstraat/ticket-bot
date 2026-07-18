@@ -3,13 +3,15 @@ import {
   humanRequired,
   type CiCallback,
   type BugFixWorkflowState,
-} from "../domain/workflow.js";
-import type { RepositoryConfig } from "../domain/repository.js";
-import type { NormalizedBugTicket } from "../domain/ticket.js";
-import type { BugFixService } from "../services/bug-fix-service.js";
-import { workspaceFromState } from "../services/bug-fix-service.js";
+} from "../../../../domain/workflow.js";
+import type { RepositoryConfig } from "../../../../domain/repository.js";
+import type { NormalizedBugTicket } from "../../../../domain/ticket.js";
+import type { BugFixApplication } from "../../../../application/bugfix-application.js";
+import { workspaceFromState } from "../../../../application/bugfix-application.js";
 import { decideRepair } from "./repair-policy.js";
-import { saveWorkflowState, type BugFixWorkflowContext } from "./workflow-context.js";
+import { saveWorkflowState, type BugFixWorkflowContext } from "../state.js";
+import { waitForCallback } from "../callbacks.js";
+import { runApplicationStep } from "../../../application-step.js";
 
 export type CiRepairResult =
   | { status: "succeeded"; state: BugFixWorkflowState }
@@ -17,14 +19,27 @@ export type CiRepairResult =
 
 export async function runCiRepairPhase(
   ctx: BugFixWorkflowContext,
-  service: BugFixService,
+  service: BugFixApplication,
   state: BugFixWorkflowState,
   ticket: NormalizedBugTicket,
   repository: RepositoryConfig,
+  callbackTimeoutMinutes: number,
 ): Promise<CiRepairResult> {
   let current = state;
   for (;;) {
-    const callback: CiCallback = await ctx.promise<CiCallback>(`jenkins-${current.repairAttempt}`);
+    const callbackWait = await waitForCallback<CiCallback>(
+      ctx,
+      "jenkins",
+      current.repairAttempt,
+      callbackTimeoutMinutes,
+    );
+    if (callbackWait.status === "timed_out")
+      return stopForHuman(
+        ctx,
+        current,
+        `Jenkins did not report for repair attempt ${current.repairAttempt} within ${callbackTimeoutMinutes} minutes`,
+      );
+    const callback = callbackWait.callback;
     if (callback.result.status === "success") return { status: "succeeded", state: current };
 
     if (!callback.failure) {
@@ -46,12 +61,14 @@ export async function runCiRepairPhase(
     const attempt = current.repairAttempt + 1;
     const stateToRepair = current;
     const failure = callback.failure;
-    const repairResult = await ctx.run(
+    const repairResult = await runApplicationStep(
+      ctx,
       `resume-codex-${attempt}`,
       () => service.continueHarness(stateToRepair, ticket, failure),
       { maxRetryAttempts: 2 },
     );
-    const repairCommit = await ctx.run(
+    const repairCommit = await runApplicationStep(
+      ctx,
       `validate-and-commit-repair-${attempt}`,
       () => service.validateAndCommitRepair(stateToRepair, ticket, repository, repairResult),
       { maxRetryAttempts: 1 },
@@ -60,9 +77,14 @@ export async function runCiRepairPhase(
       ctx,
       service.createRepairState(stateToRepair, repairResult, repairCommit.commitSha, failure),
     );
-    await ctx.run(`push-repair-${attempt}`, () => service.push(workspaceFromState(current)), {
-      maxRetryAttempts: 3,
-    });
+    await runApplicationStep(
+      ctx,
+      `push-repair-${attempt}`,
+      () => service.push(workspaceFromState(current)),
+      {
+        maxRetryAttempts: 3,
+      },
+    );
   }
 }
 

@@ -1,5 +1,5 @@
 import * as restate from "@restatedev/restate-sdk";
-import type { BugFixWorkflowState } from "../domain/workflow.js";
+import type { BugFixWorkflowState } from "../../../domain/workflow.js";
 
 export interface WorkflowStateStore {
   workflowState?: BugFixWorkflowState;

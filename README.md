@@ -2,16 +2,17 @@
 
 Ticket Bot is an initial vertical slice of a durable, token-efficient bug-resolution platform. Jira, GitLab, Jenkins, SonarQube, retry policy, state, and context reduction are ordinary TypeScript. Codex is used only for repository investigation, editing, repair, and independent review.
 
-The default configuration uses fake Jira, GitLab, and Codex adapters while exercising a real isolated Git workspace. The same workflow can select the Codex CLI and HTTP Jira/GitLab adapters with `ADAPTER_MODE=real`.
+The default configuration uses fake Jira, GitLab, and Codex adapters while exercising a real isolated Git workspace. The same workflow can select the Codex SDK with `HARNESS_MODE=codex` and HTTP Jira/GitLab adapters with `ADAPTER_MODE=real`.
 
 ## What works
 
 - Restate workflow identity and durable state per ticket generation.
+- The Restate SDK owns the HTTP/2 service endpoint, including bidirectional protocol support.
 - Paginated, deduplicated, fixed Jira-filter queues with independent per-ticket dispatch.
 - Normalized, bounded Jira context.
 - Read-only structured investigation and deterministic High/High confidence gate before Jira or code mutation.
 - Per-ticket clone and branch with path containment checks.
-- Provider-neutral coding harness with fake and structured Codex CLI implementations.
+- Provider-neutral coding harness with fake and official Codex SDK implementations.
 - Focused-diff validation, commit, push, and draft merge request creation.
 - Jenkins callback compaction, fingerprinting, classification, and bounded repair loop.
 - Changed-file/new-code Sonar filtering and callback.

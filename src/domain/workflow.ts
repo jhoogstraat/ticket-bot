@@ -52,17 +52,26 @@ export interface BugFixWorkflowResult {
   detail?: string;
 }
 export interface CiCallback {
+  correlation: CallbackCorrelation;
   result: CiResult;
   failure?: CompactCiFailure;
 }
 export interface SonarCallback {
+  correlation: CallbackCorrelation;
   qualityGate: "passed" | "failed";
   findings: SonarFinding[];
 }
 export interface MergeRequestReviewCallback {
-  commitSha?: string;
+  correlation: CallbackCorrelation;
   requiredFeedbackResolved: boolean;
   detail?: string;
+}
+
+/** Immutable identity supplied by an external check for a published revision. */
+export interface CallbackCorrelation {
+  attempt: number;
+  commitSha: string;
+  providerEventId: string;
 }
 
 export const emptyTokenUsage = (): TokenUsage => ({

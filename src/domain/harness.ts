@@ -95,7 +95,6 @@ export interface CodingHarness {
   continueTask(sessionId: string, input: ContinueHarnessTaskInput): Promise<HarnessRunResult>;
   reviseTask(sessionId: string, input: ReviseHarnessTaskInput): Promise<HarnessRunResult>;
   review(input: ReviewHarnessTaskInput): Promise<HarnessReviewResult>;
-  cancel(sessionId: string): Promise<void>;
 }
 
 export function usedTokens(usage?: HarnessUsage): number {

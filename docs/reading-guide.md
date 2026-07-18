@@ -39,12 +39,12 @@ flowchart TD
 Follow this order for an end-to-end mental model. On a first pass, read public types and top-level methods before implementation details.
 
 1. [`src/server.ts`](../src/server.ts) — composition root: which concrete services, harnesses, runners, adapters, workflows, and webhooks make up the application.
-2. [`src/workflows/bug-fix-queue.ts`](../src/workflows/bug-fix-queue.ts) and [`src/services/bug-fix-queue-service.ts`](../src/services/bug-fix-queue-service.ts) — how a Jira filter becomes one immutable, deduplicated batch of independent ticket workflows.
-3. [`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts) — the thin canonical coordinator for durable phase ordering and terminal outcomes.
-4. [`src/workflows/initial-fix-phase.ts`](../src/workflows/initial-fix-phase.ts), [`src/workflows/review-phase.ts`](../src/workflows/review-phase.ts), [`src/workflows/ci-repair-phase.ts`](../src/workflows/ci-repair-phase.ts), and [`src/workflows/completion-phase.ts`](../src/workflows/completion-phase.ts) — the readable lifecycle phases called by the coordinator.
+2. [`src/restate/services/bugfix-queue.ts`](../src/restate/services/bugfix-queue.ts) and [`src/application/bugfix-queue-capture.ts`](../src/application/bugfix-queue-capture.ts) — how a Jira filter becomes one immutable, deduplicated batch of independent ticket workflows.
+3. [`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts) — the thin canonical coordinator for durable phase ordering and terminal outcomes.
+4. [`src/restate/workflows/bugfix/phases/initial-fix.ts`](../src/restate/workflows/bugfix/phases/initial-fix.ts), [`src/restate/workflows/bugfix/phases/review.ts`](../src/restate/workflows/bugfix/phases/review.ts), [`src/restate/workflows/bugfix/phases/ci-repair.ts`](../src/restate/workflows/bugfix/phases/ci-repair.ts), and [`src/restate/workflows/bugfix/phases/completion.ts`](../src/restate/workflows/bugfix/phases/completion.ts) — the readable lifecycle phases called by the coordinator.
 5. [`src/domain/workflow.ts`](../src/domain/workflow.ts) — the durable state, grouped stage types, transition helpers, and callback contracts.
-6. [`src/services/bug-fix-service.ts`](../src/services/bug-fix-service.ts) — ticket-level operations called by the workflow, without Restate concerns.
-7. [`src/domain/analysis.ts`](../src/domain/analysis.ts) and [`src/workflows/repair-policy.ts`](../src/workflows/repair-policy.ts) — the deterministic decisions about whether work may begin or a CI repair may continue.
+6. [`src/application/bugfix-application.ts`](../src/application/bugfix-application.ts) — ticket-level operations called by the workflow, without Restate concerns.
+7. [`src/domain/analysis.ts`](../src/domain/analysis.ts) and [`src/restate/workflows/bugfix/phases/repair-policy.ts`](../src/restate/workflows/bugfix/phases/repair-policy.ts) — the deterministic decisions about whether work may begin or a CI repair may continue.
 8. [`src/domain/harness.ts`](../src/domain/harness.ts) — the provider-neutral contract for investigation, implementation, repair, revision, and independent review.
 9. [`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts), [`src/harness/harness-prompts.ts`](../src/harness/harness-prompts.ts), and [`src/harness/harness-result-parser.ts`](../src/harness/harness-result-parser.ts) — how bounded Codex processes receive prompts and return validated structured results.
 10. [`src/runner/execution-runner.ts`](../src/runner/execution-runner.ts) and [`src/runner/workspace-manager.ts`](../src/runner/workspace-manager.ts) — execution isolation, repository workspaces, branches, validation, commits, and pushes.
@@ -54,24 +54,24 @@ For a narrower question, jump directly to the matching responsibility below rath
 
 ## Responsibility map
 
-| Question                                      | Start here                                                                  | Responsibility                                                                 |
-| --------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| How does the process start?                   | [`src/server.ts`](../src/server.ts)                                         | Runtime wiring and Restate endpoint registration                               |
-| How are tickets selected?                     | [`src/workflows/bug-fix-queue.ts`](../src/workflows/bug-fix-queue.ts)       | Fixed queue capture and independent workflow dispatch                          |
-| What happens next for one ticket?             | [`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts) | Ordering, durability, retries, waits, and state transitions                    |
-| How is one operation performed?               | [`src/services/bug-fix-service.ts`](../src/services/bug-fix-service.ts)     | Jira evidence, workspaces, harness calls, validation, publication, and handoff |
-| Why was a ticket blocked?                     | [`src/domain/analysis.ts`](../src/domain/analysis.ts)                       | Analysis contract and deterministic confidence/repository gate                 |
-| Why was CI repaired or stopped?               | [`src/workflows/repair-policy.ts`](../src/workflows/repair-policy.ts)       | Bounded repair eligibility and stop conditions                                 |
-| What may the coding agent do?                 | [`src/domain/harness.ts`](../src/domain/harness.ts)                         | Agent-facing operation and result boundaries                                   |
-| How is Codex invoked safely?                  | [`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts)           | Bounded subprocess sessions, permissions, timeouts, and schemas                |
-| How are repositories isolated?                | [`src/runner`](../src/runner)                                               | Execution abstraction, containment, workspaces, and Git operations             |
-| How do Jira, GitLab, Jenkins, and Sonar work? | [`src/integrations`](../src/integrations)                                   | Replaceable external-system adapters                                           |
-| How do asynchronous results resume work?      | [`src/webhooks`](../src/webhooks)                                           | Validation, correlation, and resolution of durable callback promises           |
+| Question                                      | Start here                                                                                                        | Responsibility                                                                 |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| How does the process start?                   | [`src/server.ts`](../src/server.ts)                                                                               | Runtime wiring and Restate endpoint registration                               |
+| How are tickets selected?                     | [`src/restate/services/bugfix-queue.ts`](../src/restate/services/bugfix-queue.ts)                                 | Fixed queue capture and independent workflow dispatch                          |
+| What happens next for one ticket?             | [`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts)                     | Ordering, durability, retries, waits, and state transitions                    |
+| How is one operation performed?               | [`src/application/bugfix-application.ts`](../src/application/bugfix-application.ts)                               | Jira evidence, workspaces, harness calls, validation, publication, and handoff |
+| Why was a ticket blocked?                     | [`src/domain/analysis.ts`](../src/domain/analysis.ts)                                                             | Analysis contract and deterministic confidence/repository gate                 |
+| Why was CI repaired or stopped?               | [`src/restate/workflows/bugfix/phases/repair-policy.ts`](../src/restate/workflows/bugfix/phases/repair-policy.ts) | Bounded repair eligibility and stop conditions                                 |
+| What may the coding agent do?                 | [`src/domain/harness.ts`](../src/domain/harness.ts)                                                               | Agent-facing operation and result boundaries                                   |
+| How is Codex invoked safely?                  | [`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts)                                                 | Bounded subprocess sessions, permissions, timeouts, and schemas                |
+| How are repositories isolated?                | [`src/runner`](../src/runner)                                                                                     | Execution abstraction, containment, workspaces, and Git operations             |
+| How do Jira, GitLab, Jenkins, and Sonar work? | [`src/integrations`](../src/integrations)                                                                         | Replaceable external-system adapters                                           |
+| How do asynchronous results resume work?      | [`src/webhooks`](../src/webhooks)                                                                                 | Validation, correlation, and resolution of durable callback promises           |
 
 ## Key terms
 
 - **Captured queue** — the immutable, deduplicated set of Jira keys returned by one complete paginated filter read. Later filter changes do not alter an active run.
-- **Per-ticket workflow** — one Restate workflow identified as `bug-fix/<ISSUE-KEY>/<generation>`. It owns durable ordering and state for exactly one ticket attempt.
+- **Per-ticket workflow** — one Restate workflow identified as `bugfix/<ISSUE-KEY>/<generation>`. It owns durable ordering and state for exactly one ticket attempt.
 - **Generation** — an explicit run number that allows a later attempt for the same Jira key without colliding with an earlier workflow.
 - **Journaled operation** — an external or non-deterministic action wrapped in `ctx.run`; Restate records its result so recovery does not blindly repeat completed work.
 - **Durable state** — the compact workflow record containing identifiers, approved analysis, workspace and commit data, MR reference, attempts, token totals, and current stage—not full conversations or raw upstream payloads.

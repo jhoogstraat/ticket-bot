@@ -1,7 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { Codex, type RunResult, type ThreadOptions, type TurnOptions } from "@openai/codex-sdk";
 import { DomainError } from "../domain/errors.js";
 import type { TicketAnalysis } from "../domain/analysis.js";
 import type {
@@ -31,6 +28,16 @@ import {
   runResultJsonSchema,
 } from "./harness-result-parser.js";
 
+interface CodexThread {
+  readonly id: string | null;
+  run(input: string, options?: TurnOptions): Promise<RunResult>;
+}
+
+export interface CodexClient {
+  startThread(options?: ThreadOptions): CodexThread;
+  resumeThread(id: string, options?: ThreadOptions): CodexThread;
+}
+
 interface InvocationResult {
   sessionId: string;
   output: unknown;
@@ -38,11 +45,18 @@ interface InvocationResult {
 }
 
 export class CodexHarness implements CodingHarness {
-  private readonly processes = new Map<string, ChildProcess>();
+  private readonly codex: CodexClient;
+
   constructor(
-    private readonly command = "codex",
     private readonly timeoutMinutes = 45,
-  ) {}
+    codex?: CodexClient,
+  ) {
+    this.codex =
+      codex ??
+      new Codex({
+        env: codexEnvironment(),
+      });
+  }
 
   async analyzeTask(input: AnalyzeHarnessTaskInput): Promise<TicketAnalysis> {
     const invocation = await this.invoke(
@@ -114,10 +128,6 @@ export class CodexHarness implements CodingHarness {
     };
   }
 
-  async cancel(sessionId: string): Promise<void> {
-    this.processes.get(sessionId)?.kill("SIGTERM");
-  }
-
   private async invoke(
     workspacePath: string,
     prompt: string,
@@ -125,126 +135,66 @@ export class CodexHarness implements CodingHarness {
     resumeSessionId?: string,
     readOnly = false,
   ): Promise<InvocationResult> {
-    const temp = await mkdtemp(join(tmpdir(), "ticket-bot-codex-"));
-    const schemaPath = join(temp, "schema.json");
-    const outputPath = join(temp, "result.json");
-    await writeFile(schemaPath, JSON.stringify(schema), "utf8");
-    const args = resumeSessionId
-      ? [
-          "exec",
-          "resume",
-          "--json",
-          "--output-schema",
-          schemaPath,
-          "-o",
-          outputPath,
-          resumeSessionId,
-          "-",
-        ]
-      : [
-          "exec",
-          "--json",
-          "-C",
-          workspacePath,
-          "-s",
-          readOnly ? "read-only" : "workspace-write",
-          "-a",
-          "never",
-          "--output-schema",
-          schemaPath,
-          "-o",
-          outputPath,
-          "-",
-        ];
+    const options: ThreadOptions = {
+      workingDirectory: workspacePath,
+      sandboxMode: readOnly ? "read-only" : "workspace-write",
+      approvalPolicy: "never",
+      webSearchMode: "disabled",
+    };
+    const thread = resumeSessionId
+      ? this.codex.resumeThread(resumeSessionId, options)
+      : this.codex.startThread(options);
+    const controller = new AbortController();
+    const timeoutState = { elapsed: false };
+    const timer = setTimeout(() => {
+      timeoutState.elapsed = true;
+      controller.abort();
+    }, this.timeoutMinutes * 60_000);
+
     try {
-      const events = await this.runProcess(args, prompt, workspacePath, resumeSessionId);
-      const final = JSON.parse(await readFile(outputPath, "utf8")) as unknown;
-      const sessionId = extractSessionId(events) ?? resumeSessionId;
-      if (!sessionId) throw new Error("Codex did not emit a session ID");
-      const usage = extractUsage(events);
-      return { sessionId, output: final, ...(usage ? { usage } : {}) };
+      const turn = await thread.run(prompt, { outputSchema: schema, signal: controller.signal });
+      const sessionId = thread.id ?? resumeSessionId;
+      if (!sessionId) throw new Error("Codex SDK did not return a thread ID");
+      return {
+        sessionId,
+        output: parseJsonResponse(turn.finalResponse),
+        ...(turn.usage ? { usage: usageFrom(turn.usage) } : {}),
+      };
+    } catch (error) {
+      if (timeoutState.elapsed)
+        throw new DomainError("HARNESS_TIMEOUT", `Codex exceeded ${this.timeoutMinutes} minutes`);
+      throw error;
     } finally {
-      await rm(temp, { recursive: true, force: true });
+      clearTimeout(timer);
     }
-  }
-
-  private runProcess(
-    args: string[],
-    prompt: string,
-    cwd: string,
-    knownSessionId?: string,
-  ): Promise<unknown[]> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(this.command, args, {
-        cwd,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, JIRA_TOKEN: undefined, GITLAB_TOKEN: undefined },
-      });
-      if (knownSessionId) this.processes.set(knownSessionId, child);
-      const events: unknown[] = [];
-      let stdout = "";
-      let stderr = "";
-      const timer = setTimeout(() => {
-        child.kill("SIGTERM");
-        reject(new DomainError("HARNESS_TIMEOUT", `Codex exceeded ${this.timeoutMinutes} minutes`));
-      }, this.timeoutMinutes * 60_000);
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-        const lines = stdout.split("\n");
-        stdout = lines.pop() ?? "";
-        for (const line of lines) {
-          try {
-            events.push(JSON.parse(line) as unknown);
-          } catch {
-            /* bounded structured stream may contain warnings */
-          }
-        }
-      });
-      child.stderr.on("data", (chunk: string) => {
-        stderr = `${stderr}${chunk}`.slice(-8_000);
-      });
-      child.on("error", (error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        if (knownSessionId) this.processes.delete(knownSessionId);
-        if (code !== 0) reject(new Error(`Codex exited with ${code}: ${stderr}`));
-        else resolve(events);
-      });
-      child.stdin.end(prompt);
-    });
   }
 }
 
-function extractSessionId(events: unknown[]): string | undefined {
-  for (const event of events) {
-    if (!event || typeof event !== "object") continue;
-    const record = event as Record<string, unknown>;
-    if (record.type === "thread.started" && typeof record.thread_id === "string")
-      return record.thread_id;
-    if (typeof record.session_id === "string") return record.session_id;
+function codexEnvironment(): Record<string, string> {
+  const environment: Record<string, string> = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value !== undefined && name !== "JIRA_TOKEN" && name !== "GITLAB_TOKEN")
+      environment[name] = value;
   }
-  return undefined;
+  return environment;
 }
 
-function extractUsage(events: unknown[]): HarnessUsage | undefined {
-  let inputTokens = 0;
-  let cachedInputTokens = 0;
-  let outputTokens = 0;
-  const visit = (value: unknown): void => {
-    if (!value || typeof value !== "object") return;
-    for (const [key, nested] of Object.entries(value)) {
-      if (typeof nested === "number") {
-        if (key === "input_tokens") inputTokens = Math.max(inputTokens, nested);
-        if (key === "cached_input_tokens") cachedInputTokens = Math.max(cachedInputTokens, nested);
-        if (key === "output_tokens") outputTokens = Math.max(outputTokens, nested);
-      } else visit(nested);
-    }
+function parseJsonResponse(response: string): unknown {
+  try {
+    return JSON.parse(response);
+  } catch (error) {
+    throw new Error(`Codex returned invalid structured output: ${String(error)}`);
+  }
+}
+
+function usageFrom(usage: {
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+}): HarnessUsage {
+  return {
+    inputTokens: usage.input_tokens,
+    cachedInputTokens: usage.cached_input_tokens,
+    outputTokens: usage.output_tokens,
   };
-  events.forEach(visit);
-  return inputTokens || outputTokens ? { inputTokens, cachedInputTokens, outputTokens } : undefined;
 }

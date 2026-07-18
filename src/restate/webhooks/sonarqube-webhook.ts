@@ -1,6 +1,7 @@
 import * as restate from "@restatedev/restate-sdk";
 import { z } from "zod";
-import type { BugFixWorkflow } from "../workflows/bug-fix-workflow.js";
+import type { BugFixRestateWorkflow } from "../workflows/bugfix/definition.js";
+import { asTerminalValidationError } from "../terminal-errors.js";
 
 const finding = z.object({
   rule: z.string(),
@@ -14,13 +15,17 @@ const finding = z.object({
 });
 const schema = z.object({
   workflowId: z.string(),
+  providerEventId: z.string().min(1),
+  attempt: z.number().int().nonnegative(),
+  commitSha: z.string().min(1),
   qualityGate: z.enum(["passed", "failed"]),
   findings: z.array(finding).max(20),
 });
 
-export function createSonarQubeWebhookService(workflow: BugFixWorkflow) {
+export function createSonarQubeWebhookIngressService(workflow: BugFixRestateWorkflow) {
   return restate.service({
     name: "SonarQubeWebhook",
+    options: { asTerminalError: asTerminalValidationError },
     handlers: {
       receive: async (ctx: restate.Context, raw: unknown) => {
         const event = schema.parse(raw);
@@ -36,9 +41,15 @@ export function createSonarQubeWebhookService(workflow: BugFixWorkflow) {
             ? { qualityGateFailure: item.qualityGateFailure }
             : {}),
         }));
-        await ctx
-          .workflowClient(workflow, event.workflowId)
-          .onSonarQube({ qualityGate: event.qualityGate, findings });
+        await ctx.workflowClient(workflow, event.workflowId).onSonarQube({
+          correlation: {
+            attempt: event.attempt,
+            commitSha: event.commitSha,
+            providerEventId: event.providerEventId,
+          },
+          qualityGate: event.qualityGate,
+          findings,
+        });
         return { accepted: true };
       },
     },

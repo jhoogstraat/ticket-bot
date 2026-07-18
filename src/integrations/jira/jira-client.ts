@@ -9,7 +9,8 @@ export interface JiraClient {
   getIssue(issueKey: string): Promise<JiraIssueDto>;
   searchOpenBugs(filterUrl: string, nextPageToken?: string): Promise<JiraSearchPage>;
   claimIssue(issueKey: string): Promise<void>;
-  markReadyToMerge(issueKey: string, mergeRequestUrl: string): Promise<void>;
+  ensureMergeRequestLink(issueKey: string, mergeRequestUrl: string): Promise<void>;
+  ensureReadyToMerge(issueKey: string): Promise<void>;
 }
 
 export class HttpJiraClient implements JiraClient {
@@ -62,21 +63,29 @@ export class HttpJiraClient implements JiraClient {
     );
     await this.transition(issueKey, "In Progress");
   }
-  async markReadyToMerge(issueKey: string, mergeRequestUrl: string): Promise<void> {
-    await this.request(
-      new URL(`${this.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/remotelink`),
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          globalId: `ticket-bot:${mergeRequestUrl}`,
-          object: { url: mergeRequestUrl, title: "Merge request" },
-        }),
-      },
+  async ensureMergeRequestLink(issueKey: string, mergeRequestUrl: string): Promise<void> {
+    const url = new URL(
+      `${this.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/remotelink`,
     );
-    await this.transition(issueKey, "Ready to merge");
+    const globalId = `ticket-bot:${mergeRequestUrl}`;
+    const existing = (await (
+      await this.request(url, { headers: { accept: "application/json" } })
+    ).json()) as Array<{
+      globalId?: string;
+    }>;
+    if (existing.some((link) => link.globalId === globalId)) return;
+    await this.request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ globalId, object: { url: mergeRequestUrl, title: "Merge request" } }),
+    });
+  }
+  ensureReadyToMerge(issueKey: string): Promise<void> {
+    return this.transition(issueKey, "Ready to merge");
   }
   private async transition(issueKey: string, targetName: string): Promise<void> {
+    const issue = await this.getIssue(issueKey);
+    if (issue.fields.status.name.toLowerCase() === targetName.toLowerCase()) return;
     const url = new URL(
       `${this.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`,
     );
@@ -85,8 +94,11 @@ export class HttpJiraClient implements JiraClient {
     const transition = body.transitions.find(
       (item) => item.name.toLowerCase() === targetName.toLowerCase(),
     );
-    if (!transition)
+    if (!transition) {
+      const refreshed = await this.getIssue(issueKey);
+      if (refreshed.fields.status.name.toLowerCase() === targetName.toLowerCase()) return;
       throw new Error(`Jira transition ${targetName} is unavailable for ${issueKey}`);
+    }
     await this.request(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -104,7 +116,8 @@ export class HttpJiraClient implements JiraClient {
 
 export class FakeJiraClient implements JiraClient {
   readonly claimed: string[] = [];
-  readonly readyToMerge: Array<{ issueKey: string; mergeRequestUrl: string }> = [];
+  readonly linkedMergeRequests: Array<{ issueKey: string; mergeRequestUrl: string }> = [];
+  readonly readyToMerge: string[] = [];
   constructor(private readonly issues: ReadonlyMap<string, JiraIssueDto>) {}
   async getIssue(issueKey: string): Promise<JiraIssueDto> {
     const issue = this.issues.get(issueKey);
@@ -128,8 +141,17 @@ export class FakeJiraClient implements JiraClient {
     this.claimed.push(issueKey);
     return Promise.resolve();
   }
-  markReadyToMerge(issueKey: string, mergeRequestUrl: string): Promise<void> {
-    this.readyToMerge.push({ issueKey, mergeRequestUrl });
+  ensureMergeRequestLink(issueKey: string, mergeRequestUrl: string): Promise<void> {
+    if (
+      !this.linkedMergeRequests.some(
+        (item) => item.issueKey === issueKey && item.mergeRequestUrl === mergeRequestUrl,
+      )
+    )
+      this.linkedMergeRequests.push({ issueKey, mergeRequestUrl });
+    return Promise.resolve();
+  }
+  ensureReadyToMerge(issueKey: string): Promise<void> {
+    if (!this.readyToMerge.includes(issueKey)) this.readyToMerge.push(issueKey);
     return Promise.resolve();
   }
 }

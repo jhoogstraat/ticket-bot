@@ -1,5 +1,13 @@
 import type { SonarFinding } from "../../domain/ci.js";
 
+const severityRanks: Readonly<Record<string, number>> = {
+  blocker: 5,
+  critical: 4,
+  major: 3,
+  minor: 2,
+  info: 1,
+};
+
 export function filterSonarFindings(
   findings: SonarFinding[],
   changedFiles: readonly string[],
@@ -27,9 +35,5 @@ export function filterSonarFindings(
 }
 
 function severityRank(severity: string): number {
-  return (
-    ({ blocker: 5, critical: 4, major: 3, minor: 2, info: 1 } as Record<string, number>)[
-      severity.toLowerCase()
-    ] ?? 0
-  );
+  return severityRanks[severity.toLowerCase()] ?? 0;
 }

@@ -1,7 +1,8 @@
 import type { BugFixQueue } from "../domain/queue.js";
+import { DomainError } from "../domain/errors.js";
 import type { JiraClient } from "../integrations/jira/jira-client.js";
 
-export class BugFixQueueService {
+export class BugFixQueueCapture {
   constructor(
     private readonly jira: JiraClient,
     private readonly now: () => Date = () => new Date(),
@@ -21,7 +22,10 @@ export class BugFixQueueService {
       }
       nextPageToken = page.isLast ? undefined : page.nextPageToken;
       if (!page.isLast && !nextPageToken)
-        throw new Error("Jira pagination did not provide a next-page token");
+        throw new DomainError(
+          "VALIDATION_FAILURE",
+          "Jira pagination did not provide a next-page token",
+        );
     } while (nextPageToken);
     return {
       filterUrl,

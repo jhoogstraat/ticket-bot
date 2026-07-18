@@ -34,5 +34,4 @@ export interface ExecutionRunner {
   activateWorkspace(workspace: Workspace): Promise<Workspace>;
   analyzeHarness(harness: CodingHarness, task: AnalyzeHarnessTaskInput): Promise<TicketAnalysis>;
   executeHarness(input: ExecuteHarnessInput): Promise<ExecutionResult>;
-  destroyWorkspace(workspaceId: string): Promise<void>;
 }

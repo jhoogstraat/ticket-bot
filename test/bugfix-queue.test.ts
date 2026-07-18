@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { JiraClient, JiraSearchPage } from "../src/integrations/jira/jira-client.js";
 import type { JiraIssueDto } from "../src/integrations/jira/jira-types.js";
-import { BugFixQueueService } from "../src/services/bug-fix-queue-service.js";
+import { BugFixQueueCapture } from "../src/application/bugfix-queue-capture.js";
 
 const issue = (key: string): JiraIssueDto => ({
   key,
@@ -23,9 +23,10 @@ describe("fixed Jira queue", () => {
         return page;
       },
       claimIssue: async () => undefined,
-      markReadyToMerge: async () => undefined,
+      ensureMergeRequestLink: async () => undefined,
+      ensureReadyToMerge: async () => undefined,
     };
-    const queue = await new BugFixQueueService(
+    const queue = await new BugFixQueueCapture(
       jira,
       () => new Date("2026-01-02T03:04:05Z"),
     ).capture("https://jira.example/issues/?filter=123", 7);

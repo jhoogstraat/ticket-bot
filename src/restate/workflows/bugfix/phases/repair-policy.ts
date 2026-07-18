@@ -1,5 +1,5 @@
-import type { CompactCiFailure } from "../domain/ci.js";
-import type { BugFixWorkflowState } from "../domain/workflow.js";
+import type { CompactCiFailure } from "../../../../domain/ci.js";
+import type { BugFixWorkflowState } from "../../../../domain/workflow.js";
 
 export type RepairDecision = { action: "repair" } | { action: "human_required"; reason: string };
 

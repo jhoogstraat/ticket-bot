@@ -12,7 +12,7 @@ import {
 } from "../src/domain/workflow.js";
 
 const state = (statusDetail?: string): BugFixWorkflowState => ({
-  runId: "bug-fix/ABC-123/1",
+  runId: "bugfix/ABC-123/1",
   issueKey: "ABC-123",
   generation: 1,
   repository: { id: "repo", cloneUrl: "git@example.test/repo.git", defaultBranch: "main" },

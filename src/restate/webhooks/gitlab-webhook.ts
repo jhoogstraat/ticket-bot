@@ -1,23 +1,31 @@
 import * as restate from "@restatedev/restate-sdk";
 import { z } from "zod";
-import type { BugFixWorkflow } from "../workflows/bug-fix-workflow.js";
+import type { BugFixRestateWorkflow } from "../workflows/bugfix/definition.js";
+import { asTerminalValidationError } from "../terminal-errors.js";
 
 export const gitLabWebhookSchema = z.object({
   workflowId: z.string(),
-  commitSha: z.string().optional(),
+  providerEventId: z.string().min(1),
+  attempt: z.number().int().nonnegative(),
+  commitSha: z.string().min(1),
   requiredFeedbackResolved: z.boolean(),
   detail: z.string().max(4_000).optional(),
 });
 
-export function createGitLabWebhookService(workflow: BugFixWorkflow) {
+export function createGitLabWebhookIngressService(workflow: BugFixRestateWorkflow) {
   return restate.service({
     name: "GitLabWebhook",
+    options: { asTerminalError: asTerminalValidationError },
     handlers: {
       receive: async (ctx: restate.Context, raw: unknown) => {
         const event = gitLabWebhookSchema.parse(raw);
         await ctx.workflowClient(workflow, event.workflowId).onGitLabReview({
           requiredFeedbackResolved: event.requiredFeedbackResolved,
-          ...(event.commitSha ? { commitSha: event.commitSha } : {}),
+          correlation: {
+            attempt: event.attempt,
+            commitSha: event.commitSha,
+            providerEventId: event.providerEventId,
+          },
           ...(event.detail ? { detail: event.detail } : {}),
         });
         return { accepted: true };

@@ -9,7 +9,7 @@ flowchart TD
     Server["server.ts: composition root"]
     Queue["BugFixQueue: capture fixed Jira queue"]
     Workflow["BugFixWorkflow: one durable execution per ticket"]
-    Service["BugFixService: ticket-level application operations"]
+    Service["BugFixApplication: ticket-level application operations"]
     Domain["Domain policies: confidence gate and repair decisions"]
     Harness["CodingHarness: investigate, implement, repair, review"]
     Runner["ExecutionRunner and WorkspaceManager"]
@@ -51,15 +51,15 @@ Jira filter URL
 - selects fake or HTTP Jira and GitLab adapters;
 - selects the fake or Codex harness;
 - creates the workspace manager and execution runner;
-- constructs `BugFixService`;
+- constructs `BugFixApplication`;
 - registers the queue workflow, per-ticket workflow, and webhook services;
-- exposes the Restate endpoint through `Bun.serve`.
+- registers the Restate endpoint with `restate.serve` and exposes the public webhook API through `Bun.serve`.
 
 Use `bun run dev` during development or `bun run start` for the built application.
 
 ### Jira filter queue
 
-[`src/workflows/bug-fix-queue.ts`](../src/workflows/bug-fix-queue.ts) exposes the `BugFixQueue` Restate service. Its `run` handler accepts:
+[`src/restate/services/bugfix-queue.ts`](../src/restate/services/bugfix-queue.ts) exposes the `BugFixQueue` Restate service. Its `run` handler accepts:
 
 ```ts
 {
@@ -68,13 +68,13 @@ Use `bun run dev` during development or `bun run start` for the built applicatio
 }
 ```
 
-[`BugFixQueueService`](../src/services/bug-fix-queue-service.ts) reads every Jira result page, deduplicates ticket keys, and returns a fixed queue. The Restate service then starts one independent `BugFixWorkflow` for each captured ticket.
+[`BugFixQueueCapture`](../src/application/bugfix-queue-capture.ts) reads every Jira result page, deduplicates ticket keys, and returns a fixed queue. The Restate service then starts one independent `BugFixWorkflow` for each captured ticket.
 
 The queue is captured once inside a journaled `ctx.run`. Tickets added to the Jira filter afterward are not silently appended to an active run.
 
 ### Single-ticket Jira webhook
 
-[`src/webhooks/jira-webhook.ts`](../src/webhooks/jira-webhook.ts) is an alternative entry point for one eligible Jira bug. It validates the event and starts a ticket workflow directly rather than loading a filter queue.
+[`src/restate/webhooks/jira-webhook.ts`](../src/restate/webhooks/jira-webhook.ts) is an alternative entry point for one eligible Jira bug. It validates the event and starts a ticket workflow directly rather than loading a filter queue.
 
 ### Optional MCP server
 
@@ -84,20 +84,20 @@ The MCP server is optional and is not called directly by the main workflow. Its 
 
 ## How Restate is used
 
-The central integration is [`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts). Restate supplies durable identity, state, side-effect journaling, and callback waits. The handler delegates the lifecycle to [`initial-fix-phase.ts`](../src/workflows/initial-fix-phase.ts), [`review-phase.ts`](../src/workflows/review-phase.ts), [`ci-repair-phase.ts`](../src/workflows/ci-repair-phase.ts), and [`completion-phase.ts`](../src/workflows/completion-phase.ts), so each phase can be read independently without hiding its journaled operations.
+The central integration is [`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts). Restate supplies durable identity, state, side-effect journaling, and callback waits. The handler delegates the lifecycle to [`initial-fix-phase.ts`](../src/restate/workflows/bugfix/phases/initial-fix.ts), [`review-phase.ts`](../src/restate/workflows/bugfix/phases/review.ts), [`ci-repair-phase.ts`](../src/restate/workflows/bugfix/phases/ci-repair.ts), and [`completion-phase.ts`](../src/restate/workflows/bugfix/phases/completion.ts), so each phase can be read independently without hiding its journaled operations.
 
 ### Durable identity
 
 Every ticket execution has a stable workflow ID:
 
 ```text
-bug-fix/<ISSUE-KEY>/<generation>
+bugfix/<ISSUE-KEY>/<generation>
 ```
 
 For example:
 
 ```text
-bug-fix/INV-123/1
+bugfix/INV-123/1
 ```
 
 The generation permits an intentional later run without confusing it with the original execution.
@@ -175,16 +175,10 @@ The harness operations are:
 - `continueTask`: repair a compact CI failure in the existing implementer session;
 - `reviseTask`: address independent review findings;
 - `review`: perform a fresh read-only adversarial review;
-- `cancel`: stop a running session.
 
-### Codex CLI adapter
+### Codex SDK adapter
 
-[`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts) implements `CodingHarness` by spawning the Codex CLI:
-
-```text
-codex exec ...
-codex exec resume ...
-```
+[`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts) implements `CodingHarness` through the official `@openai/codex-sdk`. The SDK manages local Codex threads and the adapter uses its typed start, resume, structured-output, and usage APIs.
 
 Each invocation receives:
 
@@ -192,7 +186,7 @@ Each invocation receives:
 - read-only or workspace-write access as appropriate;
 - a JSON output schema;
 - a hard timeout;
-- no Jira or GitLab credentials.
+- no Jira or GitLab credentials in the Codex runtime environment.
 
 Investigation and review start fresh read-only sessions. Implementation repairs resume the implementer session so the agent receives only the compact new evidence required for that correction.
 
@@ -208,17 +202,17 @@ The dependency `@modelcontextprotocol/sdk` is used only by the optional engineer
 
 ## Core workflow and application logic
 
-The following files contain the behavior that defines the bug-fix process.
+The following files contain the behavior that defines the bugfix process.
 
 ### Durable orchestration
 
-[`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts) owns high-level ordering and durable state transitions. Its phase modules decide the detailed steps for initial implementation, independent review, CI repair, and final handoff. Together they decide when to investigate, gate, claim, review, publish, repair, wait, stop, or hand off.
+[`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts) owns high-level ordering and durable state transitions. Its phase modules decide the detailed steps for initial implementation, independent review, CI repair, and final handoff. Together they decide when to investigate, gate, claim, review, publish, repair, wait, stop, or hand off.
 
 This is the most important file for understanding the end-to-end behavior.
 
 ### Ticket-level application service
 
-[`src/services/bug-fix-service.ts`](../src/services/bug-fix-service.ts) coordinates individual operations without depending on Restate. It:
+[`src/application/bugfix-application.ts`](../src/application/bugfix-application.ts) coordinates individual operations without depending on Restate. It:
 
 - loads and normalizes Jira evidence;
 - resolves the target repository;
@@ -246,7 +240,7 @@ Keeping Restate out of this class makes the application behavior easier to test 
 
 ### Repair policy
 
-[`src/workflows/repair-policy.ts`](../src/workflows/repair-policy.ts) determines whether a Jenkins failure may trigger another code change. It stops for infrastructure failures, repeated unchanged failures, and exhausted repair limits.
+[`src/restate/workflows/bugfix/phases/repair-policy.ts`](../src/restate/workflows/bugfix/phases/repair-policy.ts) determines whether a Jenkins failure may trigger another code change. It stops for infrastructure failures, repeated unchanged failures, and exhausted repair limits.
 
 ### Domain contracts
 
@@ -321,30 +315,11 @@ Adapters and runners supply lower-level protections such as:
 - changed-file limits;
 - output-schema validation.
 
-## Telemetry and observability
-
-Telemetry is currently a lightweight extension seam rather than a complete production observability implementation.
-
-[`src/telemetry/token-usage.ts`](../src/telemetry/token-usage.ts) converts workflow token totals into metric attributes for:
-
-- initial implementation;
-- repairs and revisions;
-- independent review;
-- total usage.
-
-[`src/telemetry/workflow-metrics.ts`](../src/telemetry/workflow-metrics.ts) defines:
-
-- a JSON structured logger;
-- a `TelemetryHooks` interface for stage durations;
-- a no-op default implementation.
-
-Token totals are already retained in durable workflow state. OpenTelemetry exporters, systematic stage-duration calls, traces, dashboards, and alerting are not yet wired into the runtime. Those are infrastructure additions and should not change workflow decisions.
-
 ## Testing boundaries
 
 The test suite reflects the architectural boundaries:
 
-- [`test/bug-fix-queue.test.ts`](../test/bug-fix-queue.test.ts): fixed paginated queue capture;
+- [`test/bugfix-queue.test.ts`](../test/bugfix-queue.test.ts): fixed paginated queue capture;
 - [`test/confidence-gate.test.ts`](../test/confidence-gate.test.ts): deterministic actionability rules;
 - [`test/repair-policy.test.ts`](../test/repair-policy.test.ts): CI repair decisions;
 - [`test/harness-result-parser.test.ts`](../test/harness-result-parser.test.ts): structured agent output validation;
@@ -362,11 +337,11 @@ bun run check
 For a first pass through the code, use this order:
 
 1. [`src/server.ts`](../src/server.ts) — see how the application is assembled.
-2. [`src/workflows/bug-fix-queue.ts`](../src/workflows/bug-fix-queue.ts) — see how filter runs fan out.
-3. [`src/workflows/bug-fix-workflow.ts`](../src/workflows/bug-fix-workflow.ts) — follow the thin durable lifecycle coordinator.
-4. [`src/workflows/initial-fix-phase.ts`](../src/workflows/initial-fix-phase.ts), [`src/workflows/review-phase.ts`](../src/workflows/review-phase.ts), [`src/workflows/ci-repair-phase.ts`](../src/workflows/ci-repair-phase.ts), and [`src/workflows/completion-phase.ts`](../src/workflows/completion-phase.ts) — read one lifecycle phase at a time.
-5. [`src/services/bug-fix-service.ts`](../src/services/bug-fix-service.ts) — inspect each ticket operation.
-6. [`src/domain/analysis.ts`](../src/domain/analysis.ts) and [`src/workflows/repair-policy.ts`](../src/workflows/repair-policy.ts) — understand deterministic policy.
+2. [`src/restate/services/bugfix-queue.ts`](../src/restate/services/bugfix-queue.ts) — see how filter runs fan out.
+3. [`src/restate/workflows/bugfix/definition.ts`](../src/restate/workflows/bugfix/definition.ts) — follow the thin durable lifecycle coordinator.
+4. [`src/restate/workflows/bugfix/phases/initial-fix.ts`](../src/restate/workflows/bugfix/phases/initial-fix.ts), [`src/restate/workflows/bugfix/phases/review.ts`](../src/restate/workflows/bugfix/phases/review.ts), [`src/restate/workflows/bugfix/phases/ci-repair.ts`](../src/restate/workflows/bugfix/phases/ci-repair.ts), and [`src/restate/workflows/bugfix/phases/completion.ts`](../src/restate/workflows/bugfix/phases/completion.ts) — read one lifecycle phase at a time.
+5. [`src/application/bugfix-application.ts`](../src/application/bugfix-application.ts) — inspect each ticket operation.
+6. [`src/domain/analysis.ts`](../src/domain/analysis.ts) and [`src/restate/workflows/bugfix/phases/repair-policy.ts`](../src/restate/workflows/bugfix/phases/repair-policy.ts) — understand deterministic policy.
 7. [`src/domain/harness.ts`](../src/domain/harness.ts) and [`src/harness/codex-harness.ts`](../src/harness/codex-harness.ts) — understand the agent boundary.
 8. [`src/runner/workspace-manager.ts`](../src/runner/workspace-manager.ts) and [`src/integrations`](../src/integrations) — inspect execution and external-system infrastructure.
 

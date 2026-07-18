@@ -11,10 +11,13 @@ import { FakeJiraClient } from "../src/integrations/jira/jira-client.js";
 import type { JiraIssueDto } from "../src/integrations/jira/jira-types.js";
 import { LocalRunner } from "../src/runner/local-runner.js";
 import { WorkspaceManager } from "../src/runner/workspace-manager.js";
-import { BugFixService } from "../src/services/bug-fix-service.js";
-import { publishInitialFix, runInitialFix } from "../src/workflows/initial-fix-phase.js";
-import { runReviewPhase } from "../src/workflows/review-phase.js";
-import type { BugFixWorkflowContext } from "../src/workflows/workflow-context.js";
+import {
+  publishInitialFix,
+  runInitialFix,
+} from "../src/restate/workflows/bugfix/phases/initial-fix.js";
+import { runReviewPhase } from "../src/restate/workflows/bugfix/phases/review.js";
+import type { BugFixWorkflowContext } from "../src/restate/workflows/bugfix/state.js";
+import { BugFixApplication } from "../src/application/bugfix-application.js";
 
 const exec = promisify(execFile);
 const cleanup: string[] = [];
@@ -79,7 +82,7 @@ describe("initial vertical slice", () => {
     const harness = new FakeCodexHarness();
     const gitlab = new FakeGitLabClient();
     const jira = new FakeJiraClient(new Map([[issue.key, issue]]));
-    const service = new BugFixService(
+    const service = new BugFixApplication(
       jira,
       gitlab,
       harness,
@@ -93,7 +96,7 @@ describe("initial vertical slice", () => {
       run: async <T>(_name: string, operation: () => Promise<T>): Promise<T> => operation(),
       set: () => undefined,
     } as unknown as BugFixWorkflowContext;
-    const initial = await runInitialFix(context, service, "bug-fix/ABC-1/1", 1, ticket, repository);
+    const initial = await runInitialFix(context, service, "bugfix/ABC-1/1", 1, ticket, repository);
     expect(initial.status).toBe("actionable");
     if (initial.status !== "actionable") throw new Error(initial.detail);
     const reviewed = await runReviewPhase(context, service, initial.state, ticket, repository);
@@ -102,7 +105,7 @@ describe("initial vertical slice", () => {
     const state = await publishInitialFix(
       context,
       service,
-      "bug-fix/ABC-1/1",
+      "bugfix/ABC-1/1",
       ticket,
       repository,
       reviewed.state,

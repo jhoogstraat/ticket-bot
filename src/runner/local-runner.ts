@@ -34,7 +34,4 @@ export class LocalRunner implements ExecutionRunner {
           : await input.harness.reviseTask(input.sessionId, input.task);
     return { result };
   }
-  destroyWorkspace(workspaceId: string): Promise<void> {
-    return this.workspaceManager.destroy(workspaceId);
-  }
 }
