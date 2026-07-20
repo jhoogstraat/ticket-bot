@@ -6,11 +6,3 @@ export const MergeRequest = z.object({
 })
 
 export type MergeRequest = z.infer<typeof MergeRequest>
-
-export interface CreateMergeRequestInput {
-  repositoryPath: string;
-  sourceBranch: string;
-  targetBranch: string;
-  title: string;
-  description: string;
-}

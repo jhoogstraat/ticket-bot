@@ -172,6 +172,18 @@ export class LocalGitWorkspaces {
     );
   }
 
+  async getHeadCommitSha(workspace: RepositoryWorkspace): Promise<string> {
+    const cwd = await this.assertUsableWorkspace(workspace);
+    await assertActiveBranch(cwd, workspace.branchName);
+
+    const { stdout } = await runGit(["rev-parse", "--verify", "HEAD^{commit}"], {
+      cwd,
+      timeout: GIT_READ_TIMEOUT_MS,
+    });
+
+    return stdout.trim();
+  }
+
   async pushBranch(workspace: RepositoryWorkspace): Promise<void> {
     const cwd = await this.assertUsableWorkspace(workspace);
     await assertActiveBranch(cwd, workspace.branchName);

@@ -182,7 +182,7 @@ export const BugFixWorkflow = restate.workflow({
           maxRetryAttempts: 3,
         });
 
-        const mergeRequest = await ctx.run(
+        await ctx.run(
           "create-draft-merge-request",
           () =>
             forges[input.forge].createMergeRequest({
@@ -198,15 +198,25 @@ export const BugFixWorkflow = restate.workflow({
         for (let round = 1; round <= limits.maxRepairAttempts; round++) {
           await ctx.sleep({ minutes: 30 });
 
-          const success = await ctx.run(`await-ci-${round}`, () =>
-            forges[input.forge].waitForChecks(workspace.path),
+          const commit = await workspaces.getHeadCommitSha(workspace);
+
+          const check = await ctx.run(`await-ci-${round}`, async () =>
+            await forges[input.forge].waitForChecks(commit, "build", workspace.path),
           );
 
-          if (success) break;
+          if (check.success) break;
 
-          // Read ci feedback (jenkins + sonarqube)
+          else if (check.targetUrl) {
 
-          // Ask coding agent to fix found issues
+            // Read ci feedback (jenkins + sonarqube)
+            await ctx.run(`fetch-jenkins-${round}`, async () => console.log("TODO"));
+
+            // Ask coding agent to fix found issues
+            await ctx.run(`fix-issues-${round}`, async () => console.log("TODO"));
+
+            // commit and push fix
+            await ctx.run(`commit-push-fix-${round}`, async () => console.log("TODO"));
+          }
         }
 
         await ctx.run("jira-ready-to-merge", () => jira.transition(ticket.key, "Ready to merge"), {
