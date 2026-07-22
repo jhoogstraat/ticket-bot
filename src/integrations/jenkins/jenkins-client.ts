@@ -5,6 +5,7 @@ const MAX_CONSOLE_BYTES = 1_048_576;
 const ANSI_ESCAPE = /\u001B\[[0-?]*[ -/]*[@-~]/g;
 const TIMESTAMP_PREFIX = /^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\]\s*/;
 const SENSITIVE_LOG_LINE = /authorization|api[ _-]?(?:key|token)/i;
+const REDACTED = "[REDACTED]";
 
 type FetchFunction = (input: URL, init?: RequestInit) => Promise<Response>;
 
@@ -41,7 +42,10 @@ export class JenkinsClient implements CiFeedbackReader {
 
     return {
       buildUrl: targetUrl.toString(),
-      logExcerpt: createFailureExcerpt(await readBoundedText(response)),
+      logExcerpt: createFailureExcerpt(await readBoundedText(response), [
+        this.username,
+        this.apiKey,
+      ]),
     };
   }
 
@@ -97,13 +101,19 @@ async function readBoundedText(response: Response): Promise<string> {
   }
 }
 
-function createFailureExcerpt(consoleText: string): string {
+function createFailureExcerpt(consoleText: string, secrets: readonly string[]): string {
   return consoleText
     .split(/\r?\n/)
-    .map((line) => line.replace(ANSI_ESCAPE, "").replace(TIMESTAMP_PREFIX, "").trimEnd())
+    .map((line) =>
+      redactSecrets(line.replace(ANSI_ESCAPE, "").replace(TIMESTAMP_PREFIX, "").trimEnd(), secrets),
+    )
     .filter((line) => !SENSITIVE_LOG_LINE.test(line))
     .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
     .slice(-200)
     .join("\n")
     .slice(-24_000);
+}
+
+function redactSecrets(line: string, secrets: readonly string[]): string {
+  return secrets.reduce((redacted, secret) => redacted.split(secret).join(REDACTED), line);
 }

@@ -2,6 +2,18 @@ import { resolve } from "node:path";
 import { z } from "zod";
 
 const nonEmptyString = z.string().trim().nonempty();
+const httpsUrl = (field: string) =>
+  z.string({ error: `${field} must be a valid HTTPS URL` }).refine(
+    (value) => {
+      try {
+        return new URL(value).protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    { error: `${field} must be a valid HTTPS URL` },
+  );
+
 const optionalSecret = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   nonEmptyString.optional(),
@@ -12,7 +24,7 @@ const jiraSchema = z
     z.strictObject({ mode: z.literal("fake") }),
     z.strictObject({
       mode: z.literal("real"),
-      base_url: z.url({ error: "jira.base_url must be a valid URL" }),
+      base_url: httpsUrl("jira.base_url"),
     }),
   ])
   .prefault({ mode: "fake" })
@@ -31,7 +43,7 @@ const ciSchema = z
     z.strictObject({ provider: z.literal("fake"), ...ciSettings }),
     z.strictObject({
       provider: z.literal("jenkins"),
-      base_url: z.url({ error: "ci.base_url must be a valid URL" }),
+      base_url: httpsUrl("ci.base_url"),
       ...ciSettings,
     }),
   ])

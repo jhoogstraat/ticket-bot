@@ -20,7 +20,7 @@ Production code follows ports-and-adapters with a durable workflow as the applic
 
 1. `src/app/server.ts` loads validated environment settings and exposes `BugFixWorkflow` through Restate.
 2. `src/workflow/workflow.ts` validates `{ issueKey, forge, url }`, fetches and normalizes Jira data, and creates an isolated Git workspace.
-3. A `CodingHarness` performs read-only analysis. `src/workflow/tasks/analysis.ts` applies the confidence gate before Jira or repository mutation.
+3. A `CodingHarness` performs read-only analysis. `src/workflow/workflow.ts` applies the confidence gate before Jira or repository mutation.
 4. The workflow claims Jira, creates an `agent/...` branch, implements and validates a bounded patch, commits it, and requests a fresh independent review.
 5. The selected forge adapter pushes the branch and idempotently creates a draft GitHub PR or GitLab MR.
 6. Restate polls CI for the exact pushed SHA. Failed Jenkins builds may feed bounded, sanitized evidence back into the same implementation session; every repair receives another independent review.
