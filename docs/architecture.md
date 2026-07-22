@@ -27,7 +27,7 @@ flowchart LR
 ## Owners
 
 - [`workflow.ts`](../src/workflow/workflow.ts) owns sequencing, retries, irreversible actions, and terminal results.
-- [`analysis.ts`](../src/workflow/tasks/analysis.ts) owns the deterministic confidence gate.
+- [`workflow.ts`](../src/workflow/workflow.ts) owns the deterministic confidence gate inline with workflow sequencing.
 - [`local-git-workspaces.ts`](../src/integrations/git/local-git-workspaces.ts) owns repository isolation, path containment, Git execution, and cleanup.
 - [`coding-harness.ts`](../src/coding/coding-harness.ts) defines the Codex/fake harness contract and structured results.
 - The Jira and forge clients own their external boundaries. Forge access is exclusively through `gh` and `glab`.

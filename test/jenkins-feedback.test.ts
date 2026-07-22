@@ -6,7 +6,8 @@ API key=should-not-leak
 ${Array.from(
   { length: 210 },
   (_, index) => `[2026-07-20T15:29:18.370Z] \u001B[31mline ${index}`,
-).join("\n")}`;
+).join("\n")}
+Build command used build-bot with api-key`;
 
 describe("JenkinsClient", () => {
   test("uses preemptive Basic auth and the predictable console endpoint", async () => {
@@ -30,6 +31,9 @@ describe("JenkinsClient", () => {
     expect(requestedUrl).toBe("https://jenkins.example.test/jenkins/job/invoicing/42/consoleText");
     expect(authorization).toBe(`Basic ${btoa("build-bot:api-key")}`);
     expect(report.logExcerpt).not.toContain("should-not-leak");
+    expect(report.logExcerpt).not.toContain("build-bot");
+    expect(report.logExcerpt).not.toContain("api-key");
+    expect(report.logExcerpt).toContain("Build command used [REDACTED] with [REDACTED]");
     expect(report.logExcerpt).not.toContain("line 0\n");
     expect(report.logExcerpt.split("\n")).toHaveLength(200);
   });

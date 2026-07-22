@@ -9,7 +9,6 @@ import type {
 import type { CiFeedbackReader } from "../domain/ci.js";
 import type { JiraClient } from "../integrations/jira/jira-client.js";
 import { normalizeJiraIssue } from "../integrations/jira/jira-normalizer.js";
-import { applyConfidenceGate } from "./tasks/analysis.js";
 
 const Input = z.object({
   issueKey: z.string().regex(/^[A-Za-z]+-\d+$/),
@@ -86,8 +85,26 @@ export function createBugFixWorkflow(dependencies: BugFixWorkflowDependencies) {
             { maxRetryAttempts: 2 },
           );
 
-          const gate = applyConfidenceGate(analysis);
-          if (!gate.actionable) return { state: "HUMAN_REQUIRED", detail: gate.reason };
+          const blockers: string[] = [];
+          if (analysis.rootCauseConfidence !== "high")
+            blockers.push("root-cause confidence is not High");
+
+          if (analysis.proposedFixConfidence !== "high")
+            blockers.push("proposed-fix confidence is not High");
+
+          if (analysis.expectedFiles.length === 0 || analysis.observableBehavior.length === 0)
+            blockers.push("the proposed change is not focused and verifiable");
+
+          if (
+            analysis.repositoryEvidence.length === 0 ||
+            analysis.reproductionEvidence.length === 0
+          )
+            blockers.push("repository or reproduction evidence is missing");
+
+          if (analysis.missingInformation.length > 0)
+            blockers.push(`missing information: ${analysis.missingInformation.join("; ")}`);
+
+          if (blockers.length > 0) return { state: "HUMAN_REQUIRED", detail: blockers.join(". ") };
 
           await ctx.run("claim-jira-ticket", () => dependencies.jira.claimIssue(ticket.key), {
             maxRetryAttempts: 3,
