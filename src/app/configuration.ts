@@ -7,50 +7,85 @@ const optionalSecret = z.preprocess(
   nonEmptyString.optional(),
 );
 
+const jiraSchema = z
+  .discriminatedUnion("mode", [
+    z.strictObject({ mode: z.literal("fake") }),
+    z.strictObject({
+      mode: z.literal("real"),
+      base_url: z.url({ error: "jira.base_url must be a valid URL" }),
+    }),
+  ])
+  .prefault({ mode: "fake" })
+  .transform((jira) =>
+    jira.mode === "real" ? { mode: jira.mode, baseUrl: jira.base_url } : { mode: jira.mode },
+  );
+
+const ciSettings = {
+  check_name: nonEmptyString.default("build"),
+  poll_interval_minutes: z.number().positive().default(5),
+  max_poll_attempts: z.number().int().positive().default(72),
+};
+
+const ciSchema = z
+  .discriminatedUnion("provider", [
+    z.strictObject({ provider: z.literal("fake"), ...ciSettings }),
+    z.strictObject({
+      provider: z.literal("jenkins"),
+      base_url: z.url({ error: "ci.base_url must be a valid URL" }),
+      ...ciSettings,
+    }),
+  ])
+  .prefault({ provider: "fake" })
+  .transform((ci) => {
+    const settings = {
+      checkName: ci.check_name,
+      pollIntervalMinutes: ci.poll_interval_minutes,
+      maxPollAttempts: ci.max_poll_attempts,
+    };
+
+    return ci.provider === "jenkins"
+      ? { provider: ci.provider, baseUrl: ci.base_url, ...settings }
+      : { provider: ci.provider, ...settings };
+  });
+
 const tomlConfigurationSchema = z.strictObject({
-  server: z
-    .strictObject({
-      port: z.number().int().positive().default(9080),
-    })
-    .prefault({}),
+  server: z.strictObject({ port: z.number().int().positive().default(9080) }).prefault({}),
   restate: z
-    .strictObject({
-      identity_keys: z.array(nonEmptyString).default([]),
-    })
-    .prefault({}),
-  jira: z
-    .strictObject({
-      mode: z.enum(["fake", "real"]).default("fake"),
-      base_url: z.url().optional(),
-    })
-    .prefault({}),
+    .strictObject({ identity_keys: z.array(nonEmptyString).default([]) })
+    .prefault({})
+    .transform(({ identity_keys }) => ({ identityKeys: identity_keys })),
+  jira: jiraSchema,
   coding: z
     .strictObject({
       provider: z.enum(["fake", "codex"]).default("fake"),
       timeout_minutes: z.number().positive().default(45),
     })
-    .prefault({}),
+    .prefault({})
+    .transform(({ provider, timeout_minutes }) => ({
+      provider,
+      timeoutMinutes: timeout_minutes,
+    })),
   workspace: z
     .strictObject({
       root: nonEmptyString.default(".bug-bot-workspaces"),
       trusted_repository_url_prefixes: z.array(nonEmptyString).default([]),
     })
-    .prefault({}),
-  ci: z
-    .strictObject({
-      provider: z.enum(["fake", "jenkins"]).default("fake"),
-      check_name: nonEmptyString.default("build"),
-      poll_interval_minutes: z.number().positive().default(5),
-      max_poll_attempts: z.number().int().positive().default(72),
-      base_url: z.url().optional(),
-    })
-    .prefault({}),
+    .prefault({})
+    .transform(({ root, trusted_repository_url_prefixes }) => ({
+      root,
+      trustedRepositoryUrlPrefixes: trusted_repository_url_prefixes,
+    })),
+  ci: ciSchema,
   limits: z
     .strictObject({
       max_changed_files: z.number().int().positive().default(15),
       max_repair_attempts: z.number().int().nonnegative().default(3),
     })
-    .prefault({}),
+    .prefault({})
+    .transform(({ max_changed_files, max_repair_attempts }) => ({
+      maxChangedFiles: max_changed_files,
+      maxRepairAttempts: max_repair_attempts,
+    })),
 });
 
 const secretEnvironmentSchema = z.strictObject({
@@ -59,47 +94,53 @@ const secretEnvironmentSchema = z.strictObject({
   JENKINS_API_KEY: optionalSecret,
 });
 
-const applicationConfigurationSchema = z.strictObject({
-  server: z.strictObject({ port: z.number().int().positive() }),
-  restate: z.strictObject({ identityKeys: z.array(nonEmptyString) }),
-  jira: z.discriminatedUnion("mode", [
-    z.strictObject({ mode: z.literal("fake") }),
-    z.strictObject({
-      mode: z.literal("real"),
-      baseUrl: z.url(),
-      token: nonEmptyString,
-    }),
-  ]),
-  coding: z.strictObject({
-    provider: z.enum(["fake", "codex"]),
-    timeoutMinutes: z.number().positive(),
-  }),
-  workspace: z.strictObject({
-    root: nonEmptyString,
-    trustedRepositoryUrlPrefixes: z.array(nonEmptyString),
-  }),
-  ci: z.discriminatedUnion("provider", [
-    z.strictObject({
-      provider: z.literal("fake"),
-      checkName: nonEmptyString,
-      pollIntervalMinutes: z.number().positive(),
-      maxPollAttempts: z.number().int().positive(),
-    }),
-    z.strictObject({
-      provider: z.literal("jenkins"),
-      baseUrl: z.url(),
-      username: nonEmptyString,
-      apiKey: nonEmptyString,
-      checkName: nonEmptyString,
-      pollIntervalMinutes: z.number().positive(),
-      maxPollAttempts: z.number().int().positive(),
-    }),
-  ]),
-  limits: z.strictObject({
-    maxChangedFiles: z.number().int().positive(),
-    maxRepairAttempts: z.number().int().nonnegative(),
-  }),
-});
+const applicationConfigurationSchema = z
+  .strictObject({
+    configuration: tomlConfigurationSchema,
+    secrets: secretEnvironmentSchema,
+  })
+  .transform(({ configuration, secrets }, context) => {
+    const jiraToken =
+      configuration.jira.mode === "real"
+        ? requiredSecret(secrets.JIRA_TOKEN, "JIRA_TOKEN", context)
+        : undefined;
+
+    const jenkinsUsername =
+      configuration.ci.provider === "jenkins"
+        ? requiredSecret(secrets.JENKINS_USERNAME, "JENKINS_USERNAME", context)
+        : undefined;
+
+    const jenkinsApiKey =
+      configuration.ci.provider === "jenkins"
+        ? requiredSecret(secrets.JENKINS_API_KEY, "JENKINS_API_KEY", context)
+        : undefined;
+
+    const jira =
+      configuration.jira.mode === "real" && jiraToken
+        ? { ...configuration.jira, token: jiraToken }
+        : configuration.jira.mode === "fake"
+          ? configuration.jira
+          : undefined;
+
+    const ci =
+      configuration.ci.provider === "jenkins" && jenkinsUsername && jenkinsApiKey
+        ? { ...configuration.ci, username: jenkinsUsername, apiKey: jenkinsApiKey }
+        : configuration.ci.provider === "fake"
+          ? configuration.ci
+          : undefined;
+
+    if (!jira || !ci) return z.NEVER;
+
+    return {
+      server: configuration.server,
+      restate: configuration.restate,
+      jira,
+      coding: configuration.coding,
+      workspace: configuration.workspace,
+      ci,
+      limits: configuration.limits,
+    };
+  });
 
 export type ApplicationConfiguration = z.infer<typeof applicationConfigurationSchema>;
 
@@ -114,55 +155,12 @@ export function parseConfiguration(
   source: unknown,
   environment: ConfigurationEnvironment = process.env,
 ): ApplicationConfiguration {
-  const toml = tomlConfigurationSchema.parse(source);
-  const secrets = secretEnvironmentSchema.parse({
-    JIRA_TOKEN: environment.JIRA_TOKEN,
-    JENKINS_USERNAME: environment.JENKINS_USERNAME,
-    JENKINS_API_KEY: environment.JENKINS_API_KEY,
-  });
-
-  const jira =
-    toml.jira.mode === "real"
-      ? {
-          mode: toml.jira.mode,
-          baseUrl: required(toml.jira.base_url, "jira.base_url"),
-          token: required(secrets.JIRA_TOKEN, "JIRA_TOKEN"),
-        }
-      : { mode: toml.jira.mode };
-
-  const ciCommon = {
-    checkName: toml.ci.check_name,
-    pollIntervalMinutes: toml.ci.poll_interval_minutes,
-    maxPollAttempts: toml.ci.max_poll_attempts,
-  };
-
-  const ci =
-    toml.ci.provider === "jenkins"
-      ? {
-          provider: toml.ci.provider,
-          baseUrl: required(toml.ci.base_url, "ci.base_url"),
-          username: required(secrets.JENKINS_USERNAME, "JENKINS_USERNAME"),
-          apiKey: required(secrets.JENKINS_API_KEY, "JENKINS_API_KEY"),
-          ...ciCommon,
-        }
-      : { provider: toml.ci.provider, ...ciCommon };
-
   return applicationConfigurationSchema.parse({
-    server: { port: toml.server.port },
-    restate: { identityKeys: toml.restate.identity_keys },
-    jira,
-    coding: {
-      provider: toml.coding.provider,
-      timeoutMinutes: toml.coding.timeout_minutes,
-    },
-    workspace: {
-      root: toml.workspace.root,
-      trustedRepositoryUrlPrefixes: toml.workspace.trusted_repository_url_prefixes,
-    },
-    ci,
-    limits: {
-      maxChangedFiles: toml.limits.max_changed_files,
-      maxRepairAttempts: toml.limits.max_repair_attempts,
+    configuration: source,
+    secrets: {
+      JIRA_TOKEN: environment.JIRA_TOKEN,
+      JENKINS_USERNAME: environment.JENKINS_USERNAME,
+      JENKINS_API_KEY: environment.JENKINS_API_KEY,
     },
   });
 }
@@ -199,11 +197,16 @@ export async function loadConfiguration(
   }
 }
 
-function required(value: string | undefined, name: string): string {
-  if (!value) throw new Error(`${name} is required`);
-  return value;
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function requiredSecret(
+  value: string | undefined,
+  name: string,
+  context: z.RefinementCtx,
+): string | undefined {
+  if (value) return value;
+  context.addIssue({ code: "custom", message: `${name} is required` });
+  return undefined;
 }
