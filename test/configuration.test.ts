@@ -160,6 +160,20 @@ describe("configuration", () => {
         { JENKINS_USERNAME: "robot", JENKINS_API_KEY: "secret" },
       ),
     ).toThrow("base_url");
+
+    expect(() =>
+      parseConfiguration(
+        { jira: { mode: "real", base_url: "http://example.atlassian.net" } },
+        { JIRA_TOKEN: "secret" },
+      ),
+    ).toThrow("HTTPS");
+
+    expect(() =>
+      parseConfiguration(
+        { ci: { provider: "jenkins", base_url: "http://jenkins.example.com" } },
+        { JENKINS_USERNAME: "robot", JENKINS_API_KEY: "secret" },
+      ),
+    ).toThrow("HTTPS");
   });
 
   test("enforces numeric bounds while allowing a zero repair budget", () => {
